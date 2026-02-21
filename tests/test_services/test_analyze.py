@@ -13,6 +13,7 @@ from src.services.analyze import (
     calculate_quality_score,
     run_analysis,
 )
+import hashlib
 
 
 # ── generate_acoustid ─────────────────────────────────────────────────────────
@@ -22,29 +23,72 @@ def test_generate_acoustid_success(tmp_path):
     dummy_file = tmp_path / "track.flac"
     dummy_file.touch()
 
-    with patch("src.services.analyze.acoustid.fingerprint_file", return_value=(180.0, b"abc123fp")):
+    expected = hashlib.sha256(b"abc123fp").hexdigest()[:16]
+
+    # Mock mutagen to return None (trigger fallback)
+    with patch("src.services.analyze.mutagen.File", return_value=None), \
+         patch("src.services.analyze.acoustid.fingerprint_file", return_value=(180.0, b"abc123fp")):
         result = generate_acoustid(dummy_file)
 
-    assert result == "abc123fp"
+    assert result == expected
 
 
 def test_generate_acoustid_returns_str_fingerprint(tmp_path):
-    """If acoustid already returns a str fingerprint, it is passed through unchanged."""
+    """If acoustid already returns a str fingerprint, it is hashed and returned."""
     dummy_file = tmp_path / "track.opus"
     dummy_file.touch()
 
-    with patch("src.services.analyze.acoustid.fingerprint_file", return_value=(200.0, "strfp999")):
+    expected = hashlib.sha256(b"strfp999").hexdigest()[:16]
+
+    # Mock mutagen to return None (trigger fallback)
+    with patch("src.services.analyze.mutagen.File", return_value=None), \
+         patch("src.services.analyze.acoustid.fingerprint_file", return_value=(200.0, "strfp999")):
         result = generate_acoustid(dummy_file)
 
-    assert result == "strfp999"
+    assert result == expected
+
+
+def test_generate_acoustid_from_metadata_flac(tmp_path):
+    """Reads fingerprint from 'acoustid_fingerprint' tag (FLAC/beets)."""
+    dummy_file = tmp_path / "meta.flac"
+    dummy_file.touch()
+
+    mock_mutagen = MagicMock()
+    mock_mutagen.__contains__.side_effect = lambda k: k == 'acoustid_fingerprint'
+    mock_mutagen.__getitem__.return_value = ["flac_meta_fp"]
+    
+    expected = hashlib.sha256(b"flac_meta_fp").hexdigest()[:16]
+
+    with patch("src.services.analyze.mutagen.File", return_value=mock_mutagen):
+        result = generate_acoustid(dummy_file)
+
+    assert result == expected
+
+
+def test_generate_acoustid_from_metadata_mp3(tmp_path):
+    """Reads fingerprint from 'TXXX:Acoustid Fingerprint' tag (ID3)."""
+    dummy_file = tmp_path / "meta.mp3"
+    dummy_file.touch()
+
+    mock_mutagen = MagicMock()
+    mock_mutagen.__contains__.side_effect = lambda k: k == 'TXXX:Acoustid Fingerprint'
+    mock_mutagen.__getitem__.return_value = ["mp3_meta_fp"]
+    
+    expected = hashlib.sha256(b"mp3_meta_fp").hexdigest()[:16]
+
+    with patch("src.services.analyze.mutagen.File", return_value=mock_mutagen):
+        result = generate_acoustid(dummy_file)
+
+    assert result == expected
 
 
 def test_generate_acoustid_failure(tmp_path):
-    """If acoustid raises, None is returned (no exception propagated)."""
+    """If both metadata and acoustid raise, None is returned."""
     dummy_file = tmp_path / "broken.flac"
     dummy_file.touch()
 
-    with patch("src.services.analyze.acoustid.fingerprint_file", side_effect=Exception("fpcalc not found")):
+    with patch("src.services.analyze.mutagen.File", side_effect=Exception("mutagen error")), \
+         patch("src.services.analyze.acoustid.fingerprint_file", side_effect=Exception("fpcalc error")):
         result = generate_acoustid(dummy_file)
 
     assert result is None

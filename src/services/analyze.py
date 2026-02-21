@@ -10,16 +10,44 @@ from src.core.schema import COLL_RELEASE, COLL_FILE, Release, MusicFile
 
 logger = logging.getLogger(__name__)
 
+import mutagen
+
 def generate_acoustid(file_path: Path) -> Optional[str]:
     """
     Generates an AcoustID chromaprint fingerprint for the given audio file
     and returns a short SHA-256 hash of it.
 
-    The raw fingerprint is a multi-kilobyte string that cannot safely be used
-    in PocketBase URL filter parameters (causes 400 errors). We hash it to a
-    16-char hex digest that is unique enough for deduplication and fits easily
-    in a GET query string.
+    Optimization: First attempts to read the fingerprint from file metadata 
+    (tags) to avoid expensive spectral analysis on network shares.
     """
+    # 1. Try reading from metadata first
+    try:
+        f = mutagen.File(file_path)
+        if f:
+            fp = None
+            # Common tag names for AcoustID fingerprints
+            # beets/Picard use 'acoustid_fingerprint' (FLAC/Vorbis) 
+            # or 'TXXX:Acoustid Fingerprint' (ID3/MP3)
+            # iTunes/MP4 uses '----:com.apple.iTunes:Acoustid Fingerprint'
+            tags_to_check = [
+                'acoustid_fingerprint', 
+                'TXXX:Acoustid Fingerprint', 
+                '----:com.apple.iTunes:Acoustid Fingerprint'
+            ]
+            
+            for tag in tags_to_check:
+                if tag in f:
+                    val = f[tag]
+                    fp = val[0] if isinstance(val, list) else val
+                    break
+            
+            if fp:
+                raw = fp.decode('utf-8') if isinstance(fp, bytes) else str(fp)
+                return hashlib.sha256(raw.encode()).hexdigest()[:16]
+    except Exception as e:
+        logger.debug(f"Metadata fingerprint lookup failed for {file_path}: {e}")
+
+    # 2. Fallback to calculation
     try:
         # fingerprint() returns (duration, fingerprint)
         duration, fp = acoustid.fingerprint_file(str(file_path))
@@ -125,10 +153,14 @@ def run_analysis() -> Dict[str, Any]:
     # Track stats
     stats = {"analyzed": 0, "new_releases": 0, "merged_files": 0, "errors": []}
     
-    # Get all un-analyzed files (where acoustid_fp is null/empty)
+    # Get all un-analyzed files or files needing fingerprint migration
+    # We pick up: 
+    # 1. New files (fp is empty/null)
+    # 2. Failed previous attempts (fp is 'FAILED')
+    # 3. Old long fingerprints (not 16 chars)
     try:
         unanalyzed_records = pb.collection('music_file').get_full_list(
-            query_params={"filter": "acoustid_fp='' || acoustid_fp=null"}
+            query_params={"filter": "acoustid_fp='' || acoustid_fp=null || acoustid_fp='FAILED' || acoustid_fp!~'^[a-f0-9]{16}$'"}
         )
     except Exception as e:
         logger.error(f"Failed to fetch unanalyzed files from pb: {e}")
