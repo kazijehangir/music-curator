@@ -10,9 +10,14 @@ async def test_task_manager_run_task_success():
     # Mock subprocess
     mock_proc = AsyncMock()
     mock_proc.pid = 999
-    mock_proc.stdout = AsyncMock()
-    mock_proc.stdout.__aiter__.return_value = [b"line1\n", b"line2\n"]
-    mock_proc.wait.return_value = 0
+    
+    # Mock readline to return two lines then EOF (empty bytes)
+    mock_proc.stdout.readline.side_effect = [
+        b"line1\n",
+        b"line2\n",
+        b""
+    ]
+    mock_proc.wait = AsyncMock(return_value=0)
     mock_proc.returncode = 0
     
     manager = TaskManager()
@@ -32,34 +37,39 @@ async def test_task_manager_run_task_success():
 async def test_task_manager_cancellation():
     mock_proc = AsyncMock()
     mock_proc.pid = 1010
-    mock_proc.stdout = AsyncMock()
     mock_proc.returncode = None
     
-    # Simulate an infinite stream that gets cancelled
-    async def infinite_stream():
-        yield b"working...\n"
-        try:
-            await asyncio.sleep(10)
-        except asyncio.CancelledError:
-            pass
-        yield b"done\n"
+    # Simulate a silent process that would time out the readline()
+    async def silent_readline():
+        await asyncio.sleep(10)
+        return b""
         
-    mock_proc.stdout.__aiter__.side_effect = infinite_stream
+    mock_proc.stdout.readline.side_effect = silent_readline
+    
+    # Mock request with disconnect detection
+    mock_request = AsyncMock()
+    # Ensure it returns True when called
+    mock_request.is_disconnected = AsyncMock(return_value=True)
     
     manager = TaskManager()
     
     with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
          patch("os.killpg") as mock_killpg, \
          patch("os.getpgid", return_value=1010), \
-         patch("asyncio.sleep", return_value=None): # Speed up fallback
+         patch("asyncio.sleep", return_value=None):
          
-        gen = manager.run_task("analyze", "/api/analyze")
-        await gen.__anext__() # Start and get first line
+        gen = manager.run_task("analyze", "/api/analyze", mock_request)
         
-        # Simulate cancellation
-        with pytest.raises(asyncio.CancelledError):
-            await gen.athrow(asyncio.CancelledError)
+        # 1. First yield is the "Task started" message
+        msg = await gen.__anext__()
+        assert "Task started" in msg
+        
+        # 2. Next yield should trigger the heartbeat check and raise CancelledError
+        # We wrap the wait_for call to force a timeout
+        with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
+            with pytest.raises(asyncio.CancelledError):
+                await gen.__anext__()
             
-        # Verify SIGTERM then SIGKILL
+        # Verify escalation logic happened
         mock_killpg.assert_any_call(1010, signal.SIGTERM)
         mock_killpg.assert_any_call(1010, signal.SIGKILL)

@@ -10,7 +10,7 @@ router = APIRouter()
 async def discover_new_files(request: Request):
     """Scans the ingest directories and inserts new files into the database."""
     return StreamingResponse(
-        task_manager.run_task("discover", "/api/discover"),
+        task_manager.run_task("discover", "/api/discover", request),
         media_type="text/plain"
     )
 
@@ -18,7 +18,7 @@ async def discover_new_files(request: Request):
 async def analyze_files(request: Request):
     """Generates AcoustID fingerprints, Librosa quality scores, and groups by release."""
     return StreamingResponse(
-        task_manager.run_task("analyze", "/api/analyze"),
+        task_manager.run_task("analyze", "/api/analyze", request),
         media_type="text/plain"
     )
 
