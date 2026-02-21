@@ -1,5 +1,5 @@
 import logging
-import pyacoustid
+import acoustid
 import librosa
 import numpy as np
 from pathlib import Path
@@ -11,7 +11,7 @@ def generate_acoustid(file_path: Path) -> Optional[str]:
     """Generates an AcoustID chromaprint fingerprint for the given audio file."""
     try:
         # fingerprint() returns (duration, fingerprint)
-        duration, fp = pyacoustid.fingerprint_file(str(file_path))
+        duration, fp = acoustid.fingerprint_file(str(file_path))
         return fp.decode('utf-8') if isinstance(fp, bytes) else fp
     except Exception as e:
         logger.error(f"Failed to generate fingerprint for {file_path}: {e}")
@@ -23,8 +23,10 @@ def get_spectral_ceiling(file_path: Path) -> Optional[float]:
     Helps detect fake upscaled FLAC files.
     """
     try:
-        # Load audio (downmix to mono, target samplerate of 44.1kHz is fine for ceiling checks up to 22kHz)
-        y, sr = librosa.load(str(file_path), sr=44100, mono=True)
+        # Load audio (downmix to mono, target sr=44100).
+        # Optimization: Only process a 15-second snippet from the middle (offset=30s)
+        # Analyzing the entire 5 minute file calculates millions of FFT frames and causes hangs
+        y, sr = librosa.load(str(file_path), sr=44100, mono=True, offset=30.0, duration=15.0)
         
         # Calculate spectral rolloff (99% of energy lies below this frequency)
         rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr, roll_percent=0.99)
