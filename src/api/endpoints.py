@@ -1,41 +1,26 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from fastapi.responses import StreamingResponse
 from typing import Dict, Any
 import asyncio
+from src.services.task_manager import task_manager
 
 router = APIRouter()
 
 @router.post("/discover")
-async def discover_new_files() -> Dict[str, Any]:
+async def discover_new_files(request: Request):
     """Scans the ingest directories and inserts new files into the database."""
-    from src.services.discover import run_discovery
+    return StreamingResponse(
+        task_manager.run_task("discover", "/api/discover"),
+        media_type="text/plain"
+    )
 
-    try:
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, run_discovery)
-        return {
-            "status": "success",
-            "new_files": result["new_files"],
-            "updated_files": result["updated_files"],
-            "errors": result["errors"]
-        }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
 @router.post("/analyze")
-async def analyze_files() -> Dict[str, Any]:
+async def analyze_files(request: Request):
     """Generates AcoustID fingerprints, Librosa quality scores, and groups by release."""
-    from src.services.analyze import run_analysis
-    try:
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, run_analysis)
-        return {
-            "status": "success",
-            "analyzed": result.get("analyzed", 0),
-            "new_releases": result.get("new_releases", 0),
-            "merged_files": result.get("merged_files", 0),
-            "errors": result.get("errors", [])
-        }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    return StreamingResponse(
+        task_manager.run_task("analyze", "/api/analyze"),
+        media_type="text/plain"
+    )
 
 @router.post("/tag")
 async def tag_files() -> Dict[str, Any]:
