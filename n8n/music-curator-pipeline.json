@@ -130,7 +130,7 @@
                 1560,
                 200
             ],
-            "notes": "Replace this No-Op with an n8n Discord node.\nCreate a Discord webhook in your server, paste the URL here.\nTip: use expressions to build the summary message:\n  Discovered: {{ $('Discover New Files').item.json.new_files }}\n  Analyzed:   {{ $('Analyze & Fingerprint').item.json.analyzed }}\n  Releases:   {{ $('Analyze & Fingerprint').item.json.new_releases }}"
+            "notes": "Replace this No-Op with an n8n Discord node.\nCreate a Discord webhook in your server, paste the URL here.\nTip: use expressions to build the summary message:\n  Discovered: {{ $('Discover New Files').item.json.new_files }}\n  Analyzed:   {{ $('Analyze & Fingerprint').item.json.analyzed }}\n  Releases:   {{ $('Analyze & Fingerprint').item.json.new_releases }}\n  Tagged:     {{ $('Tag & Enrich Metadata').item.json.tagged }}\n  MB Matched: {{ $('Tag & Enrich Metadata').item.json.mb_matched }}\n  LLM:        {{ $('Tag & Enrich Metadata').item.json.llm_processed }}"
         },
         {
             "parameters": {},
