@@ -5,6 +5,8 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
 
+from src.core.schema import COLL_RELEASE, COLL_FILE, Release, MusicFile
+
 logger = logging.getLogger(__name__)
 
 def generate_acoustid(file_path: Path) -> Optional[str]:
@@ -145,21 +147,20 @@ def run_analysis() -> Dict[str, Any]:
             
             # 2. Update File Record
             update_data = {
-                'acoustid_fp': fp or "FAILED",
-                'spectral_ceiling': ceiling,
-                'quality_score': score,
-                'quality_verdict': verdict
+                MusicFile.ACOUSTID_FP: fp or "FAILED",
+                MusicFile.SPECTRAL_CEILING: ceiling,
+                MusicFile.QUALITY_SCORE: score,
+                MusicFile.QUALITY_VERDICT: verdict
             }
-            pb.collection('music_file').update(record.id, update_data)
+            pb.collection(COLL_FILE).update(record.id, update_data)
             stats["analyzed"] += 1
             
             if not fp:
                 continue # Cannot deduplicate without footprint
                 
             # 3. Deduplication Logic
-            # Does this fingerprint already exist in a release?
-            duplicate_files = pb.collection('music_file').get_list(
-                1, 2, {"filter": f"acoustid_fp='{fp}' && id!='{record.id}'"}
+            duplicate_files = pb.collection(COLL_FILE).get_list(
+                1, 2, {"filter": f"{MusicFile.ACOUSTID_FP}='{fp}' && id!='{record.id}'"}
             )
             
             target_release_id = None
@@ -172,40 +173,42 @@ def run_analysis() -> Dict[str, Any]:
                     stats["merged_files"] += 1
                     
             if not target_release_id:
-                # Completely new footprint, create new release parent
-                # We'll use the raw string to extract rough placeholders
-                raw_str = getattr(record, 'raw_title__raw_artist__raw_album', 'Unknown | Unknown | Unknown')
-                parts = raw_str.split(' | ')
-                title = parts[0] if len(parts) > 0 else "Unknown Title"
-                artist = parts[1] if len(parts) > 1 else "Unknown Artist"
-                album = parts[2] if len(parts) > 2 else "Unknown Album"
-                
-                new_release = pb.collection('music_release').create({
-                    'canonical_title': title.strip(),
-                    'canonical_artist': artist.strip(),
-                    'canonical_album': album.strip(),
-                    'mb_status': 'unknown',
-                    'needs_review': True # Flag for fuzzy raw creation
+                # Completely new fingerprint — create new release parent.
+                # The raw combo field holds "title | artist | album" from mutagen.
+                # For untagged files (common with Yubal opus downloads), all three
+                # parts may be empty strings. We fall back to the filename stem for
+                # title so the release has something meaningful to display.
+                raw_str = getattr(record, MusicFile.RAW_META, '') or ''
+                parts = [p.strip() for p in raw_str.split(' | ')]
+
+                title  = (parts[0] if len(parts) > 0 and parts[0] else '') or Path(file_path_str).stem
+                artist = (parts[1] if len(parts) > 1 and parts[1] else '') or 'Unknown Artist'
+                album  = (parts[2] if len(parts) > 2 and parts[2] else '') or ''
+
+                new_release = pb.collection(COLL_RELEASE).create({
+                    Release.TITLE: title,
+                    Release.ARTIST: artist,
+                    Release.ALBUM: album,
+                    Release.MB_STATUS: 'unknown',
+                    Release.NEEDS_REVIEW: True
                 })
                 target_release_id = new_release.id
                 stats["new_releases"] += 1
                 
             # Tie this file to the release parent
-            pb.collection('music_file').update(record.id, {'release': target_release_id})
+            pb.collection(COLL_FILE).update(record.id, {MusicFile.RELEASE: target_release_id})
             
             # 4. Primary Election (Ranking)
             # Fetch all files tied to this release, sort by quality score descending
-            siblings = pb.collection('music_file').get_full_list(
-                query_params={"filter": f"release='{target_release_id}'", "sort": "-quality_score"}
+            siblings = pb.collection(COLL_FILE).get_full_list(
+                query_params={"filter": f"{MusicFile.RELEASE}='{target_release_id}'", "sort": f"-{MusicFile.QUALITY_SCORE}"}
             )
-            
+
             if siblings:
                 best_file_id = siblings[0].id
-                
-                # Link release to best file, adjust counts
-                pb.collection('music_release').update(target_release_id, {
-                    'best_file': best_file_id,
-                    'file_count': len(siblings)
+                pb.collection(COLL_RELEASE).update(target_release_id, {
+                    Release.BEST_FILE: best_file_id,
+                    Release.FILE_COUNT: len(siblings)
                 })
                 
                 # Flag the specific primary file loop
