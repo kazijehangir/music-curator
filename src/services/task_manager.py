@@ -15,13 +15,18 @@ logger = logging.getLogger(__name__)
 # 2. Task-Specific Persistent Log (Rotating)
 # This captures EVERYTHING from subprocesses for local tail -f
 TASK_LOG_FILE = "/var/log/music-curator/tasks.log"
-task_log_handler = RotatingFileHandler(TASK_LOG_FILE, maxBytes=10*1024*1024, backupCount=3)
-task_log_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
-
 task_logger = logging.getLogger("music_curator_tasks")
 task_logger.setLevel(logging.INFO)
-task_logger.addHandler(task_log_handler)
-task_logger.propagate = False # Keep it out of standard app logs
+task_logger.propagate = False  # Keep it out of standard app logs
+
+try:
+    Path(TASK_LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
+    task_log_handler = RotatingFileHandler(TASK_LOG_FILE, maxBytes=10*1024*1024, backupCount=3)
+    task_log_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
+    task_logger.addHandler(task_log_handler)
+except OSError:
+    # CI or environments without write access to /var/log — log to stderr instead.
+    task_logger.addHandler(logging.StreamHandler())
 
 class TaskManager:
     """
