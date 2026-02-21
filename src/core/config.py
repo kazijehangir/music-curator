@@ -10,14 +10,18 @@ class Settings(BaseSettings):
     pocketbase_admin_password: str
     
     # External APIs
-    ollama_url: str = "http://10.0.2.100:5000"
+    lm_studio_url: str = "http://localhost:1234/v1"
     
     # Internal Paths
-    nas_mount_path: str = "/mnt/user/main"
-    ingest_dirs: list[str] = ["yubal", "tidal-dl", "adhoc"]
-    media_library_path: str = "/mnt/user/main/media/Music"
+    nas_mount_path: str
+    ingest_dirs: str = "yubal,tidal-dl,adhoc" # Keep as comma separated string for env inject
+    media_library_path: str
     
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env", 
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
 
 # Global settings instance
 settings = Settings()
