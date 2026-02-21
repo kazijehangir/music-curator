@@ -23,9 +23,12 @@ async def analyze_files(request: Request):
     )
 
 @router.post("/tag")
-async def tag_files() -> Dict[str, Any]:
-    """Runs beets import, mutagen gap-fill, and Ollama LLM normalization."""
-    return {"status": "accepted", "tagged": 0, "mb_matched": 0, "message": "Tagging skeleton"}
+async def tag_files(request: Request):
+    """Runs beets import, mutagen gap-fill, and LLM normalization."""
+    return StreamingResponse(
+        task_manager.run_task("tag", "/api/tag", request),
+        media_type="text/plain"
+    )
 
 @router.post("/symlink")
 async def create_symlinks(request: Request):

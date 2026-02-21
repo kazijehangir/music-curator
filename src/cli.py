@@ -40,16 +40,22 @@ def run_symlink():
     result = run_symlink()
     print(f"RESULT: {result}")
 
+def run_tag():
+    from src.services.tagging import run_tagging
+    result = run_tagging()
+    print(f"RESULT: {result}")
+
 def main():
     parser = argparse.ArgumentParser(description="Music Curator CLI")
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("discover", help="Run file discovery")
     subparsers.add_parser("analyze", help="Run audio analysis")
-    subparsers.add_parser("cleanup-releases", help="Delete orphaned music_release rows with no linked files")
-    subparsers.add_parser("repair-metadata", help="Re-extract tags for files stored with empty metadata (' |  | ')")
-    subparsers.add_parser("reanalyze-quality", help="Re-run spectral ceiling + quality scoring for all files (use after algorithm changes)")
-    subparsers.add_parser("symlink", help="Create/update symlinks for primary files; remove stale ones")
+    subparsers.add_parser("cleanup-releases", help="Delete orphaned music_release rows")
+    subparsers.add_parser("repair-metadata", help="Re-extract tags for files")
+    subparsers.add_parser("reanalyze-quality", help="Re-run spectral ceiling")
+    subparsers.add_parser("symlink", help="Create/update symlinks")
+    subparsers.add_parser("tag", help="Run metadata tagging (MB, sidecar, LLM)")
 
     args = parser.parse_args()
 
@@ -65,6 +71,8 @@ def main():
         run_reanalyze_quality()
     elif args.command == "symlink":
         run_symlink()
+    elif args.command == "tag":
+        run_tag()
     else:
         parser.print_help()
         sys.exit(1)

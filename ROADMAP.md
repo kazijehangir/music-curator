@@ -24,10 +24,10 @@ This file tracks the implementation progress of the Music Curator pipeline based
 
 ## Phase 4: Metadata Intelligence (Days 20–26)
 
-* [ ] **Beets Integration**: Auto-match to MusicBrainz and store MBIDs.
-* [ ] **Mutagen Gap-Fill**: Read from sidecars (`.info.json`).
-* [ ] **LLM Normalization**: Send raw metadata to Ollama for transliteration, parsing, genre inference.
-* [ ] **Connect `/api/tag`**.
+* [x] **Beets Integration**: Auto-match to MusicBrainz and store MBIDs.
+* [x] **Mutagen Gap-Fill**: Read from sidecars (`.info.json`).
+* [x] **LLM Normalization**: Send raw metadata to LMStudio for transliteration, parsing, genre inference.
+* [x] **Connect `/api/tag`**.
 
 ## Phase 5: MusicBrainz Contribution (Days 27–32)
 
