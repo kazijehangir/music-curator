@@ -136,6 +136,54 @@ def calculate_quality_score(
 
     return min(100, score), verdict
 
+def cleanup_orphaned_releases() -> Dict[str, Any]:
+    """
+    Deletes music_release rows that have no music_file pointing to them.
+
+    Strategy (2 API calls + 1 call per orphan):
+      1. Fetch all release IDs.
+      2. Fetch all files and collect the set of referenced release IDs.
+      3. Delete every release whose ID is not in the referenced set.
+    """
+    from src.services.discover import get_pb_client
+
+    pb = get_pb_client()
+    stats = {"checked": 0, "deleted": 0, "errors": []}
+
+    # 1. All release IDs
+    all_releases = pb.collection(COLL_RELEASE).get_full_list(
+        query_params={"fields": "id"}
+    )
+    stats["checked"] = len(all_releases)
+    print(f"STATUS: Found {stats['checked']} total releases.")
+
+    # 2. All referenced release IDs (from music_file.release)
+    all_files = pb.collection(COLL_FILE).get_full_list(
+        query_params={"fields": "release", "filter": "release!=''"}
+    )
+    referenced_ids = {getattr(f, MusicFile.RELEASE, None) for f in all_files} - {None, ""}
+    print(f"STATUS: {len(referenced_ids)} releases are referenced by at least one file.")
+
+    # 3. Delete orphans
+    orphan_ids = [r.id for r in all_releases if r.id not in referenced_ids]
+    total_orphans = len(orphan_ids)
+    print(f"STATUS: {total_orphans} orphaned releases to delete.")
+
+    for i, release_id in enumerate(orphan_ids):
+        try:
+            pb.collection(COLL_RELEASE).delete(release_id)
+            stats["deleted"] += 1
+            if (i + 1) % 50 == 0:
+                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+        except Exception as e:
+            msg = f"Failed to delete release {release_id}: {e}"
+            logger.error(msg)
+            stats["errors"].append(msg)
+
+    print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
+    return stats
+
+
 def run_analysis() -> Dict[str, Any]:
     """
     Full pipeline to analyze un-fingerprinted files in PocketBase, 
@@ -160,7 +208,7 @@ def run_analysis() -> Dict[str, Any]:
     # 3. Old long fingerprints (not 16 chars)
     try:
         unanalyzed_records = pb.collection('music_file').get_full_list(
-            query_params={"filter": "acoustid_fp='' || acoustid_fp=null || acoustid_fp='FAILED' || acoustid_fp!~'^[a-f0-9]{16}$'"}
+            query_params={"filter": "acoustid_fp='' || acoustid_fp=null || acoustid_fp='FAILED'"}
         )
     except Exception as e:
         logger.error(f"Failed to fetch unanalyzed files from pb: {e}")
@@ -209,9 +257,11 @@ def run_analysis() -> Dict[str, Any]:
             duplicate_files = pb.collection(COLL_FILE).get_list(
                 1, 2, {"filter": f"{MusicFile.ACOUSTID_FP}='{fp}' && id!='{record.id}'"}
             )
-            
-            target_release_id = None
-            
+
+            # Preserve existing release assignment — re-analyzing a file (e.g.
+            # after a FAILED fingerprint) must not create a duplicate release.
+            target_release_id = getattr(record, MusicFile.RELEASE, None) or None
+
             if duplicate_files.items:
                 # We have a match! Attach to existing release
                 existing_match = duplicate_files.items[0]

@@ -20,12 +20,18 @@ def run_analyze():
     result = run_analysis()
     print(f"RESULT: {result}")
 
+def run_cleanup_releases():
+    from src.services.analyze import cleanup_orphaned_releases
+    result = cleanup_orphaned_releases()
+    print(f"RESULT: {result}")
+
 def main():
     parser = argparse.ArgumentParser(description="Music Curator CLI")
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("discover", help="Run file discovery")
     subparsers.add_parser("analyze", help="Run audio analysis")
+    subparsers.add_parser("cleanup-releases", help="Delete orphaned music_release rows with no linked files")
     # Future commands: tag, symlink, etc.
 
     args = parser.parse_args()
@@ -34,6 +40,8 @@ def main():
         run_discover()
     elif args.command == "analyze":
         run_analyze()
+    elif args.command == "cleanup-releases":
+        run_cleanup_releases()
     else:
         parser.print_help()
         sys.exit(1)
