@@ -194,3 +194,7 @@ The Python service has no database of its own — PocketBase is the single sourc
 - `notes/gemini-revised-plan.md` — Alternative v2 perspective. Superseded by v3.
 - `notes/claude-research.md` — Original tool-level research: API calls, config snippets, library comparisons.
 - `notes/gemini-research.md` — Original architecture research: distributed design, Windows-as-API strategy, LLM prompt engineering.
+
+## Development Standards
+
+- **Markdown Quality**: Every time a Markdown (`.md`) file is created or modified, you MUST run `npx markdownlint-cli --fix <file>` to ensure it adheres to style standards. Fix any remaining warnings manually.
