@@ -11,10 +11,10 @@ This file tracks the implementation progress of the Music Curator pipeline based
 
 ## Phase 2: Fingerprinting + Quality + Dedup (Days 7–14)
 
-* [ ] **Fingerprinting**: Generate AcoustID via `pyacoustid` and store it.
-* [ ] **Quality Scoring**: FLAC Detective + librosa spectral rolloff.
-* [ ] **Deduplication**: Match fingerprints or fuzzy metadata, auto-group into `music_release`, and evaluate the `best_file`.
-* [ ] **Connect `/api/analyze`**.
+* [x] **Fingerprinting**: Generate AcoustID via `pyacoustid` and store it.
+* [x] **Quality Scoring**: FLAC Detective + librosa spectral rolloff.
+* [x] **Deduplication**: Match fingerprints or fuzzy metadata, auto-group into `music_release`, and evaluate the `best_file`.
+* [x] **Connect `/api/analyze`**.
 
 ## Phase 3: Symlinks + Plex (Days 15–19)
 

@@ -21,11 +21,12 @@ async def discover_new_files() -> Dict[str, Any]:
     except Exception as e:
         return {"status": "error", "message": str(e)}
 @router.post("/analyze")
-def analyze_files() -> Dict[str, Any]:
+async def analyze_files() -> Dict[str, Any]:
     """Generates AcoustID fingerprints, Librosa quality scores, and groups by release."""
     from src.services.analyze import run_analysis
     try:
-        result = run_analysis()
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, run_analysis)
         return {
             "status": "success",
             "analyzed": result.get("analyzed", 0),
