@@ -20,9 +20,20 @@ def discover_new_files() -> Dict[str, Any]:
         return {"status": "error", "message": str(e)}
 
 @router.post("/analyze")
-async def analyze_files() -> Dict[str, Any]:
+def analyze_files() -> Dict[str, Any]:
     """Generates AcoustID fingerprints, Librosa quality scores, and groups by release."""
-    return {"status": "accepted", "analyzed": 0, "new_releases": 0, "message": "Analysis skeleton"}
+    from src.services.analyze import run_analysis
+    try:
+        result = run_analysis()
+        return {
+            "status": "success",
+            "analyzed": result.get("analyzed", 0),
+            "new_releases": result.get("new_releases", 0),
+            "merged_files": result.get("merged_files", 0),
+            "errors": result.get("errors", [])
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @router.post("/tag")
 async def tag_files() -> Dict[str, Any]:
