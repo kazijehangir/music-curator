@@ -37,7 +37,7 @@ The user's hardware portfolio offers a diverse set of capabilities. A monolithic
 | Hardware Node | Component Role | Assigned Microservices & Responsibilities |
 | :--- | :--- | :--- |
 | **Proxmox Host** | Orchestration Plane | **LXC Container (Ubuntu):** Hosting the "Master Controller" (Python/n8n) [5]. This node manages the state database (Redis/SQLite), handles API polling, and triggers workflows on other nodes. It acts as the traffic cop. |
-| **Unraid Server** | Storage & Media | **Docker Containers:** beets (Library Management) [6], Plex Media Server (Playback), PostgreSQL (Metadata Index). <br> **Storage:** Exports `/mnt/user/music` (Library) and `/mnt/user/downloads` (Ingest) via NFS. |
+| **Unraid Server** | Storage & Media | **Docker Containers:** beets (Library Management) [6], Plex Media Server (Playback), PostgreSQL (Metadata Index). **Storage:** Exports `/mnt/user/music` (Library) and `/mnt/user/downloads` (Ingest) via NFS. |
 | **Windows PC** | Compute Node | **GPU Worker:** Leveraging the RTX 3080 Ti for AI workloads. Hosts Ollama [7] for metadata cleaning and potentially fat_llama [8] or penthy [9] for neural-network-based audio upscale detection. |
 | **MacBook** | Interface & Verification | **Client:** Used for "Human-in-the-Loop" verification. Runs Playwright scripts [10] in "headed" mode to automate the final click-through for MusicBrainz submissions that require visual confirmation. |
 

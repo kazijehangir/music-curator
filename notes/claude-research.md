@@ -41,7 +41,7 @@ The list comes ordered newest-first, so a polling strategy stores `videoId` valu
 ### Why Not the Official YouTube Data API v3?
 
 | Issue | Detail |
-|---|---|
+| --- | --- |
 | Wrong playlist | Accesses generic "Liked Videos" (LL), not YTM's "Liked Music" (LM) |
 | Quota limits | 10,000 units/day |
 | No service accounts | OAuth with user consent only |
@@ -58,7 +58,7 @@ For lightweight enumeration without downloading, yt-dlp supports `--flat-playlis
 YouTube Music **never serves lossless audio**. Maximum quality tiers:
 
 | Format | Codec | Bitrate | Requirement |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 251 | Opus | ~128–160 kbps | Free |
 | 140 | AAC LC | 128 kbps | Free |
 | 774 | Opus | 256 kbps | YT Music Premium |
@@ -79,7 +79,7 @@ yt-dlp -f 141 --embed-metadata --embed-thumbnail --write-info-json \
 Requires paid streaming subscriptions. **[Streamrip](https://github.com/nathom/streamrip)** (v2.1.0 March 2025, actively maintained) is the strongest option:
 
 | Service | Max Quality |
-|---|---|
+| --- | --- |
 | Qobuz | 24-bit/192 kHz FLAC |
 | Tidal | 16-bit FLAC / MQA |
 | Deezer | 16-bit FLAC (HiFi) |
@@ -99,7 +99,7 @@ Features: CLI-based search, async downloads, SQLite deduplication, configurable 
 
 No existing tool automatically searches across all providers and picks highest quality. This requires custom logic:
 
-```
+```text
 For each new track from ytmusicapi:
   Search Qobuz → Tidal → Deezer via streamrip
   Fall back to YouTube Music via yt-dlp
@@ -214,7 +214,7 @@ Bots must simulate the web UI by POSTing to internal form endpoints with session
 ### Where LLMs Help
 
 | Task | Notes |
-|---|---|
+| --- | --- |
 | Metadata completeness audit | Feed tag dumps from mutagen/ffprobe; flag missing artist, album, track number, genre, or album art |
 | Encoding issue detection | Spot mojibake (garbled Unicode) and inconsistent transliteration within a discography |
 | Non-Latin romanization | Urdu → Roman Urdu, Devanagari → romanized Hindi, Arabic script transliteration. Rule-based alternative: [uroman](https://github.com/isi-nlp/uroman) |
@@ -239,7 +239,7 @@ Bots must simulate the web UI by POSTing to internal form endpoints with session
 
 ### Expected Hierarchy
 
-```
+```text
 /Music/ArtistName/AlbumName/TrackNumber - TrackName.ext
 ```
 
@@ -325,7 +325,7 @@ Airflow (requires scheduler + webserver + PostgreSQL, minimum 4 GB RAM), Dagster
 ## 8. Existing Projects
 
 | Project | Status | Notes |
-|---|---|---|
+| --- | --- | --- |
 | [Lidarr](https://github.com/Lidarr/Lidarr) | Active | 100% MusicBrainz-dependent. If an artist/album isn't in MB, Lidarr cannot see it. Album-centric only. |
 | [Tubifarry](https://github.com/TypNull/Tubifarry) | Active | Lidarr plugin adding YouTube as source + Discogs/Deezer/Last.fm metadata. Fragile due to YouTube API changes. |
 | Lidarr-on-Steroids | Active | Bundles Lidarr with Deemix for Deezer. Requires Deezer Premium + expiring ARL tokens. |
@@ -340,7 +340,7 @@ Airflow (requires scheduler + webserver + PostgreSQL, minimum 4 GB RAM), Dagster
 
 The pipeline divides into five stages, each with a primary tool and fallback:
 
-```
+```text
 ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
 │  1. POLL     │───▶│  2. DOWNLOAD │───▶│  3. TAG      │───▶│  4. ORGANIZE │───▶│  5. SERVE    │
 │  ytmusicapi  │    │  streamrip   │    │  beets       │    │  beets paths │    │  Plex/       │
@@ -352,7 +352,7 @@ The pipeline divides into five stages, each with a primary tool and fallback:
 ```
 
 | Stage | Action |
-|---|---|
+| --- | --- |
 | **1. Poll** | Huey periodic task runs `get_liked_songs()` every 30 min, diffs against SQLite, queues new `videoId` entries |
 | **2. Download** | Search Qobuz/Tidal/Deezer via streamrip for lossless; fall back to yt-dlp. Always save `.info.json` sidecars. |
 | **3. Tag** | Run `beet import -q` with `quiet_fallback: asis`. Post-process with mutagen to fill gaps from `.info.json`. |
@@ -430,7 +430,7 @@ For **new content that doesn't exist in MB yet** — new artists, new releases, 
 
 **Practical pipeline stage for verified files:**
 
-```
+```text
 For each verified file:
   1. Search MB: does recording exist? (by ISRC if present, then artist+title fuzzy match)
 
@@ -459,7 +459,7 @@ Your local Llama model normalizes messy FLAC tags into the structured data MB ex
 
 **Example prompt:**
 
-```
+```text
 Given these audio file tags:
   Artist: "Nusrat Fateh Ali Khan"
   Album: "Mustt Mustt"
