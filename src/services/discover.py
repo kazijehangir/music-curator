@@ -101,9 +101,11 @@ def run_discovery() -> Dict[str, Any]:
                     
                     # Check if file exists in PocketBase
                     file_path_str = str(filepath)
-                    # Note: pocketbase filter syntax
+                    # Note: pocketbase filter syntax requires escaping single quotes by duplicating them or using parameter binding if supported.
+                    # Since python SDK uses simple strings, we escape single quotes.
+                    safe_path_str = file_path_str.replace("'", "\\'")
                     records = pb.collection('music_file').get_list(
-                        1, 1, {"filter": f"file_path='{file_path_str}'"}
+                        1, 1, {"filter": f"file_path='{safe_path_str}'"}
                     )
                     
                     if records.items:
