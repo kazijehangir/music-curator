@@ -1,5 +1,8 @@
 # music-curator
 
+[![CI](https://github.com/kazijehangir/music-curator/actions/workflows/ci.yml/badge.svg)](https://github.com/kazijehangir/music-curator/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/kazijehangir/music-curator/branch/main/graph/badge.svg)](https://codecov.io/gh/kazijehangir/music-curator)
+
 A self-hosted curation pipeline for Pakistani/South Asian music. Handles transliteration variance, upscaled lossy files masquerading as lossless, and tracks with no MusicBrainz entry.
 
 ## Architecture

@@ -1,0 +1,256 @@
+{
+  "name": "Music Curator Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://10.0.1.113:8000/api/discover",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "a1b2c3d4-0002-0002-0002-000000000002",
+      "name": "Discover New Files",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-new-files",
+              "leftValue": "={{ $json.new_files }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "a1b2c3d4-0003-0003-0003-000000000003",
+      "name": "New files found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://10.0.1.113:8000/api/analyze",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "a1b2c3d4-0004-0004-0004-000000000004",
+      "name": "Analyze & Fingerprint",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-analyzed",
+              "leftValue": "={{ $json.analyzed }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "a1b2c3d4-0005-0005-0005-000000000005",
+      "name": "Files analyzed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://10.0.1.113:8000/api/tag",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "a1b2c3d4-0006-0006-0006-000000000006",
+      "name": "Tag & Enrich Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://10.0.1.113:8000/api/symlink",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "a1b2c3d4-0007-0007-0007-000000000007",
+      "name": "Rebuild Plex Symlinks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 100]
+    },
+    {
+      "parameters": {},
+      "id": "a1b2c3d4-0008-0008-0008-000000000008",
+      "name": "Send Discord Summary\n(add Discord webhook node here)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1780, 100],
+      "notes": "Replace this No-Op with an n8n Discord node.\nCreate a Discord webhook in your server, paste the URL here.\nTip: use expressions to build the summary message:\n  Discovered: {{ $('Discover New Files').item.json.new_files }}\n  Analyzed:   {{ $('Analyze & Fingerprint').item.json.analyzed }}\n  Releases:   {{ $('Analyze & Fingerprint').item.json.new_releases }}"
+    },
+    {
+      "parameters": {},
+      "id": "a1b2c3d4-0009-0009-0009-000000000009",
+      "name": "Nothing to do",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [900, 420]
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Discover New Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discover New Files": {
+      "main": [
+        [
+          {
+            "node": "New files found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New files found?": {
+      "main": [
+        [
+          {
+            "node": "Analyze & Fingerprint",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nothing to do",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze & Fingerprint": {
+      "main": [
+        [
+          {
+            "node": "Files analyzed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Files analyzed?": {
+      "main": [
+        [
+          {
+            "node": "Tag & Enrich Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nothing to do",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tag & Enrich Metadata": {
+      "main": [
+        [
+          {
+            "node": "Rebuild Plex Symlinks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rebuild Plex Symlinks": {
+      "main": [
+        [
+          {
+            "node": "Send Discord Summary\n(add Discord webhook node here)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "tags": ["music-curator"],
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "music-curator-pipeline-v1"
+  }
+}
