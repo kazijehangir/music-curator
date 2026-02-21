@@ -71,9 +71,9 @@ def extract_metadata(filepath: Path) -> Dict[str, Any]:
 def run_discovery() -> Dict[str, Any]:
     """
     Scans the ingest directories and inserts new files into PocketBase.
-    Reads from /mnt/user/main/downloads/unseeded/music/
+    Reads from the configured base ingest path.
     """
-    base_path = Path(settings.nas_mount_path) / "downloads" / "unseeded" / "music"
+    base_path = Path(settings.ingest_base_path)
     pb = get_pb_client()
     
     new_files_count = 0
@@ -83,7 +83,9 @@ def run_discovery() -> Dict[str, Any]:
     # Supported audio extensions
     VALID_EXTS = {'.flac', '.opus', '.mp3', '.m4a', '.aac', '.ogg', '.wav'}
 
-    for dir_name in settings.ingest_dirs:
+    ingest_folders = [d.strip() for d in settings.ingest_dirs.split(',')]
+
+    for dir_name in ingest_folders:
         ingest_path = base_path / dir_name
         if not ingest_path.exists():
             continue

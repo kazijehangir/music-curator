@@ -5,7 +5,7 @@ from src.services.discover import run_discovery
 from src.core.config import settings
 
 def test_run_discovery_skip_invalid_exts(tmp_path, mocker):
-    mocker.patch.object(settings, "nas_mount_path", str(tmp_path))
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
     
     # setup valid and invalid files
     yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
@@ -49,7 +49,7 @@ def test_run_discovery_skip_invalid_exts(tmp_path, mocker):
     assert create_call['codec'] == 'flac'
 
 def test_run_discovery_update_file(tmp_path, mocker):
-    mocker.patch.object(settings, "nas_mount_path", str(tmp_path))
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
     
     yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
     yubal_dir.mkdir(parents=True)

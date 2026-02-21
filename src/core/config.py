@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     
     # Internal Paths
     nas_mount_path: str
+    ingest_base_path: str
     ingest_dirs: str = "yubal,tidal-dl,adhoc" # Keep as comma separated string for env inject
     media_library_path: str
     
