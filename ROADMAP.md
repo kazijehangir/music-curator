@@ -7,7 +7,7 @@ This file tracks the implementation progress of the Music Curator pipeline based
 * [x] **Infrastructure**: Provision LXC, Unraid NAS mounts (`/mnt/user/main/downloads/unseeded/music/`, `/media/Music/`).
 * [x] **API Scaffolding**: FastAPI structure, basic endpoints, pytest setup, systemd deployments.
 * [x] **Deploy PocketBase**: Set up collections (`music_release`, `music_file`, `music_metadata_source`).
-* [ ] **Implement `/api/discover`**: Logic to walk ingest directories, hash files, extract metadata via `mutagen`, and insert into PocketBase.
+* [x] **Implement `/api/discover`**: Logic to walk ingest directories, hash files, extract metadata via `mutagen`, and insert into PocketBase.
 
 ## Phase 2: Fingerprinting + Quality + Dedup (Days 7–14)
 
