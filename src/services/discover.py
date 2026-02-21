@@ -109,8 +109,8 @@ def run_discovery() -> Dict[str, Any]:
                     if records.items:
                         # File exists, check if hash changed
                         existing_record = records.items[0]
-                        # Use .get() dictionary access for pocketbase python sdk custom records
-                        existing_hash = existing_record.get('file_hash')
+                        # Use getattr() for pocketbase python sdk custom records which use setattr
+                        existing_hash = getattr(existing_record, 'file_hash', None)
                         if existing_hash != file_hash:
                             pb.collection('music_file').update(existing_record.id, {
                                 'file_hash': file_hash,

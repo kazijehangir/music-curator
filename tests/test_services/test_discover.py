@@ -61,15 +61,8 @@ def test_run_discovery_update_file(tmp_path, mocker):
     mock_pb_client = mocker.MagicMock()
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
     
-    # Mock existing record with a DIFFERENT hash providing both dict-like and obj-like access
-    class MockRecord:
-        def __init__(self, data):
-            self.id = data.get("id")
-            self._data = data
-        def get(self, key, default=None):
-            return self._data.get(key, default)
-            
-    existing_record = MockRecord({"file_hash": "old_hash", "id": "rec_123"})
+    # Mock existing record with a DIFFERENT hash
+    existing_record = mocker.MagicMock(file_hash="old_hash", id="rec_123")
     mock_records = mocker.MagicMock()
     mock_records.items = [existing_record]
     mock_pb_client.collection.return_value.get_list.return_value = mock_records
