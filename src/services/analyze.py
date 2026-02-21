@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import acoustid
 import librosa
@@ -10,11 +11,21 @@ from src.core.schema import COLL_RELEASE, COLL_FILE, Release, MusicFile
 logger = logging.getLogger(__name__)
 
 def generate_acoustid(file_path: Path) -> Optional[str]:
-    """Generates an AcoustID chromaprint fingerprint for the given audio file."""
+    """
+    Generates an AcoustID chromaprint fingerprint for the given audio file
+    and returns a short SHA-256 hash of it.
+
+    The raw fingerprint is a multi-kilobyte string that cannot safely be used
+    in PocketBase URL filter parameters (causes 400 errors). We hash it to a
+    16-char hex digest that is unique enough for deduplication and fits easily
+    in a GET query string.
+    """
     try:
         # fingerprint() returns (duration, fingerprint)
         duration, fp = acoustid.fingerprint_file(str(file_path))
-        return fp.decode('utf-8') if isinstance(fp, bytes) else fp
+        raw = fp.decode('utf-8') if isinstance(fp, bytes) else fp
+        # Shorten to a URL-safe 16-char hex digest for storage/filtering
+        return hashlib.sha256(raw.encode()).hexdigest()[:16]
     except Exception as e:
         logger.error(f"Failed to generate fingerprint for {file_path}: {e}")
         return None
