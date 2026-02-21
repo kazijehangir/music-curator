@@ -11,10 +11,12 @@ async def test_task_manager_run_task_success():
     mock_proc = AsyncMock()
     mock_proc.pid = 999
     
-    # Mock readline to return two lines then EOF (empty bytes)
+    # Mock readline to return a mix of raw logs and status updates
     mock_proc.stdout.readline.side_effect = [
-        b"line1\n",
-        b"line2\n",
+        b"raw debug log 1\n",
+        b"STATUS: Analyzing 1/2\n",
+        b"raw debug log 2\n",
+        b"RESULT: Success\n",
         b""
     ]
     mock_proc.wait = AsyncMock(return_value=0)
@@ -22,16 +24,24 @@ async def test_task_manager_run_task_success():
     
     manager = TaskManager()
     
-    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+    # Mock the task_logger to verify raw routing
+    with patch("src.services.task_manager.task_logger") as mock_task_logger, \
+         patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
          patch("os.getpgid", return_value=999):
+         
         lines = []
         async for line in manager.run_task("discover", "/api/discover"):
             lines.append(line)
             
-    assert "Task started for /api/discover (PID: 999)\n" in lines
-    assert "line1\n" in lines
-    assert "line2\n" in lines
-    assert "Task completed successfully.\n" in lines
+    # Verify n8n output only has filtered lines
+    assert any("Task started" in l for l in lines)
+    assert "STATUS: Analyzing 1/2\n" in lines
+    assert "RESULT: Success\n" in lines
+    assert "raw debug log 1\n" not in lines # Should be filtered out
+    
+    # Verify raw logger received EVERYTHING
+    mock_task_logger.info.assert_any_call("[/api/discover] raw debug log 1")
+    mock_task_logger.info.assert_any_call("[/api/discover] STATUS: Analyzing 1/2")
 
 @pytest.mark.asyncio
 async def test_task_manager_cancellation():
@@ -39,37 +49,29 @@ async def test_task_manager_cancellation():
     mock_proc.pid = 1010
     mock_proc.returncode = None
     
-    # Simulate a silent process that would time out the readline()
+    # Mock silent process
     async def silent_readline():
         await asyncio.sleep(10)
         return b""
-        
     mock_proc.stdout.readline.side_effect = silent_readline
     
-    # Mock request with disconnect detection
     mock_request = AsyncMock()
-    # Ensure it returns True when called
     mock_request.is_disconnected = AsyncMock(return_value=True)
     
     manager = TaskManager()
     
-    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+    with patch("src.services.task_manager.task_logger"), \
+         patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
          patch("os.killpg") as mock_killpg, \
          patch("os.getpgid", return_value=1010), \
          patch("asyncio.sleep", return_value=None):
          
         gen = manager.run_task("analyze", "/api/analyze", mock_request)
+        await gen.__anext__() # Consume start msg
         
-        # 1. First yield is the "Task started" message
-        msg = await gen.__anext__()
-        assert "Task started" in msg
-        
-        # 2. Next yield should trigger the heartbeat check and raise CancelledError
-        # We wrap the wait_for call to force a timeout
         with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
             with pytest.raises(asyncio.CancelledError):
                 await gen.__anext__()
             
-        # Verify escalation logic happened
         mock_killpg.assert_any_call(1010, signal.SIGTERM)
         mock_killpg.assert_any_call(1010, signal.SIGKILL)

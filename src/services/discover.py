@@ -97,6 +97,7 @@ def run_discovery() -> Dict[str, Any]:
         if not ingest_path.exists():
             continue
             
+        print(f"STATUS: Scanning folder: {dir_name}")
         for root, _, files in os.walk(ingest_path):
             for file in files:
                 filepath = Path(root) / file
@@ -125,9 +126,9 @@ def run_discovery() -> Dict[str, Any]:
                             })
                             updated_files_count += 1
                     else:
-                        # New file — extract metadata with a timeout safety net.
-                        # mutagen reads audio headers (fast), but on a stalled CIFS mount
-                        # it can block. We abort after FILE_TIMEOUT_SECONDS.
+                        # New file
+                        print(f"STATUS: New file discovered: {filepath.name}")
+                        # metadata extraction safety net...
                         try:
                             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
                                 future = ex.submit(extract_metadata, filepath)

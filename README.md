@@ -105,6 +105,24 @@ scripts/          # Setup and deployment scripts
 - `POST /api/release/{id}/reanalyze`: Manual trigger for updates.
 - `GET /api/health`: Validates the health of the system pipeline.
 
+## Observability & Debugging
+
+The system uses a **Dual-Layer Observability** model to balance clean orchestration with deep technical visibility:
+
+### 1. Real-time n8n Status
+API endpoints (`/discover`, `/analyze`, etc.) use `StreamingResponse` to provide human-readable progress updates to n8n. Output is filtered to show only high-level `STATUS:`, `RESULT:`, and `ERROR:` messages.
+
+### 2. Persistent Rotating Logs
+Every raw detail (including full `ffmpeg` and `librosa` output) is captured in a persistent rotating log file on the host. This is the primary source for deep debugging.
+```bash
+tail -f /tmp/music-curator.log
+```
+- **Location**: `/tmp/music-curator.log`
+- **Retention**: 10MB per file, 3 backups.
+
+### Task Cancellation
+Tasks run in isolated process groups (`start_new_session=True`). The service detects client disconnection (e.g., stopping an n8n workflow) via a 1s heartbeat and automatically escalates from `SIGTERM` to `SIGKILL` to ensures all background processes are cleanly terminated.
+
 ## Systemd
 We use systemd to run this automatically. To deploy standard changes, use:
 `./scripts/deploy_service.sh`

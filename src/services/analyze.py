@@ -167,7 +167,10 @@ def run_analysis() -> Dict[str, Any]:
         stats["errors"].append(str(e))
         return stats
 
-    for record in unanalyzed_records:
+    total = len(unanalyzed_records)
+    print(f"STATUS: Found {total} files needing analysis.")
+
+    for i, record in enumerate(unanalyzed_records):
         file_path_str = getattr(record, 'file_path', None)
         if not file_path_str:
             continue
@@ -177,6 +180,7 @@ def run_analysis() -> Dict[str, Any]:
             stats["errors"].append(f"File not found on disk: {file_path_str}")
             continue
             
+        print(f"STATUS: Analyzing [{i+1}/{total}] {file_path.name}")
         try:
             # 1. Forensic Processing
             fp = generate_acoustid(file_path)

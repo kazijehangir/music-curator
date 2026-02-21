@@ -46,7 +46,10 @@ The system follows a **Three-Layer Architecture** where each component has disti
 
 ### Key Principles
 
-* **Stateless Compute**: The Python service has no database; it treats PocketBase as the single source of truth.
+* **Stateless Compute**: The Python service has no database; it treats PocketBase as the single source of truth. Task execution state is transient and managed via process groups.
+* **Dual-Layer Observability**:
+    * **n8n Status**: Filtered real-time stream for orchestration (yields only `STATUS:`, `RESULT:`, `ERROR:`).
+    * **Technical Log**: Persistent rotating log at `/tmp/music-curator.log` for deep debugging (captures everything).
 * **Non-Destructive**: Never delete or modify source audio files (unless tagging metadata in the primary file). Use symlinks for the user-facing library.
 * **Signal over Tags**: Trust spectral analysis (`librosa`) over container formats or stated bitrates for quality assessment.
 * **Confidence-Based Metadata**: Use the `metadata_sources` hierarchy to resolve conflicts (Manual > MusicBrainz > LLM > Raw Tags).
