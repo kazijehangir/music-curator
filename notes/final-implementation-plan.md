@@ -356,7 +356,17 @@ Edits in `music_release` are instantly reflected in Plex via realtime hooks.
 | **Metadata tagging** | beets + mutagen | Matching and tag R/W. |
 | **LLM metadata** | Ollama | Transliteration and genre inference. |
 
-## 12. Risk Register
+## 12. Maintenance CLI Commands
+
+The Python compute service ships a CLI for one-off operational tasks that are not part of the regular n8n pipeline.
+
+| Command | Description |
+| :--- | :--- |
+| `python -m src.cli discover` | Run file discovery manually. |
+| `python -m src.cli analyze` | Run audio analysis / fingerprinting manually. |
+| `python -m src.cli cleanup-releases` | Delete `music_release` rows that have no `music_file` pointing to them. Safe to re-run; prints a progress count and a final summary. |
+
+## 13. Risk Register
 
 | Risk | Severity | Mitigation |
 | :--- | :--- | :--- |
@@ -364,8 +374,9 @@ Edits in `music_release` are instantly reflected in Plex via realtime hooks.
 | **Broken symlinks** | Med | Health check endpoint monitors resolution. |
 | **Plex symlink support** | High | Correct volume mounts in Docker. |
 | **LLM hallucination** | Med | Confidence capping and Pydantic validation. |
+| **Duplicate `music_release` rows** | Med | Fixed: analyze filter no longer uses PocketBase's `!~` (substring) operator as a regex; existing release assignment is preserved on re-analysis. Run `cleanup-releases` CLI command to purge any orphans already in the database. |
 
-## 13. Open Decisions
+## 14. Open Decisions
 
 * **PocketBase deployment:** Same LXC as Python for fastest performance.
 * **Custom frontend:** Admin UI is sufficient for Phase 1.

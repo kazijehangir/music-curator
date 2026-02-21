@@ -12,7 +12,9 @@ from src.services.analyze import (
     get_spectral_ceiling,
     calculate_quality_score,
     run_analysis,
+    cleanup_orphaned_releases,
 )
+from src.core.schema import COLL_RELEASE, COLL_FILE, MusicFile
 import hashlib
 
 
@@ -223,6 +225,7 @@ def test_run_analysis_new_release(mocker, tmp_path):
     record.bitrate = 1411000
     record.bit_depth = 16
     record.raw_title__raw_artist__raw_album = "Pasoori | Ali Sethi | Coke Studio"
+    record.release = None  # New file — no release yet
 
     mock_pb = _make_pb_mock(mocker, unanalyzed_records=[record])
 
@@ -259,6 +262,7 @@ def test_run_analysis_fingerprint_dedup(mocker, tmp_path):
     record.bitrate = 1411000
     record.bit_depth = 16
     record.raw_title__raw_artist__raw_album = "Pasoori | Ali Sethi | Coke Studio"
+    record.release = None  # New file — no release yet
 
     # An existing sibling with the same fingerprint, already in release "relExisting"
     existing_match = MagicMock()
@@ -287,3 +291,169 @@ def test_run_analysis_fingerprint_dedup(mocker, tmp_path):
     assert result["new_releases"] == 0
     # create() should NOT have been called for music_release
     mock_pb.collection.return_value.create.assert_not_called()
+
+
+# ── run_analysis regression tests ─────────────────────────────────────────────
+
+def test_run_analysis_no_duplicate_release_for_already_assigned_file(mocker, tmp_path):
+    """Regression (Bug 2): a file that already has a release must NOT create a new
+    release on re-analysis, even when no fingerprint duplicate is found in the DB."""
+    audio_file = tmp_path / "already_grouped.flac"
+    audio_file.write_bytes(b"\x00" * 1024)
+
+    record = MagicMock()
+    record.id = "file004"
+    record.file_path = str(audio_file)
+    record.codec = "flac"
+    record.bitrate = 1411000
+    record.bit_depth = 16
+    record.raw_title__raw_artist__raw_album = "Song | Artist | Album"
+    record.release = "existing_rel_abc"  # Already assigned from a prior run
+
+    mock_pb = _make_pb_mock(mocker, unanalyzed_records=[record])
+
+    mocker.patch("src.services.analyze.generate_acoustid", return_value="fp_unique_xyz")
+    mocker.patch("src.services.analyze.get_spectral_ceiling", return_value=20000.0)
+
+    sibling = MagicMock()
+    sibling.id = "file004"
+    mock_pb.collection.return_value.get_full_list.side_effect = [
+        [record],    # unanalyzed files
+        [sibling],   # siblings for best_file election
+    ]
+
+    result = run_analysis()
+
+    assert result["new_releases"] == 0
+    mock_pb.collection.return_value.create.assert_not_called()
+
+
+def test_run_analysis_filter_excludes_broken_regex_operator(mocker):
+    """Regression (Bug 1): the PocketBase query filter must not use the !~ operator.
+    In PocketBase !~ means 'does not contain' (substring), not 'regex not-match',
+    so `acoustid_fp!~'^[a-f0-9]{16}$'` matched every record and caused all files
+    to be re-processed on every pipeline run."""
+    mock_pb = _make_pb_mock(mocker, unanalyzed_records=[])
+
+    run_analysis()
+
+    call_kwargs = mock_pb.collection.return_value.get_full_list.call_args
+    filter_str = call_kwargs.kwargs.get("query_params", {}).get("filter", "")
+    assert "!~" not in filter_str, (
+        "Filter must not use !~ (PocketBase substring-not-contains), "
+        "which would match every file and cause repeated re-analysis"
+    )
+
+
+# ── cleanup_orphaned_releases ──────────────────────────────────────────────────
+
+def _pb_for_cleanup(mocker, all_release_ids, referenced_release_ids):
+    """Returns (mock_pb, release_coll_mock, file_coll_mock) configured for cleanup tests.
+
+    all_release_ids: every release ID currently in music_release.
+    referenced_release_ids: IDs that appear in at least one music_file.release field.
+    """
+    mock_pb = MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb)
+
+    release_coll = MagicMock()
+    file_coll = MagicMock()
+
+    def _collection(name):
+        return release_coll if name == COLL_RELEASE else file_coll
+
+    mock_pb.collection.side_effect = _collection
+
+    release_records = []
+    for rid in all_release_ids:
+        r = MagicMock()
+        r.id = rid
+        release_records.append(r)
+    release_coll.get_full_list.return_value = release_records
+
+    file_records = []
+    for rid in referenced_release_ids:
+        f = MagicMock()
+        f.release = rid
+        file_records.append(f)
+    file_coll.get_full_list.return_value = file_records
+
+    return mock_pb, release_coll, file_coll
+
+
+def test_cleanup_deletes_orphaned_releases(mocker):
+    """Releases not referenced by any file are deleted; referenced ones are kept."""
+    _, release_coll, _ = _pb_for_cleanup(
+        mocker,
+        all_release_ids=["rel1", "rel2", "rel3"],
+        referenced_release_ids=["rel1"],
+    )
+
+    result = cleanup_orphaned_releases()
+
+    assert result["checked"] == 3
+    assert result["deleted"] == 2
+    assert result["errors"] == []
+    deleted_ids = {call.args[0] for call in release_coll.delete.call_args_list}
+    assert deleted_ids == {"rel2", "rel3"}
+
+
+def test_cleanup_preserves_all_referenced_releases(mocker):
+    """If every release has at least one file pointing to it, nothing is deleted."""
+    _, release_coll, _ = _pb_for_cleanup(
+        mocker,
+        all_release_ids=["rel1", "rel2"],
+        referenced_release_ids=["rel1", "rel2"],
+    )
+
+    result = cleanup_orphaned_releases()
+
+    assert result["deleted"] == 0
+    release_coll.delete.assert_not_called()
+
+
+def test_cleanup_all_orphaned(mocker):
+    """If no files exist at all, every release is deleted."""
+    _, release_coll, _ = _pb_for_cleanup(
+        mocker,
+        all_release_ids=["rel1", "rel2", "rel3"],
+        referenced_release_ids=[],
+    )
+
+    result = cleanup_orphaned_releases()
+
+    assert result["deleted"] == 3
+    assert result["errors"] == []
+
+
+def test_cleanup_empty_database(mocker):
+    """Empty database: nothing to check, nothing to delete, no errors."""
+    _, release_coll, _ = _pb_for_cleanup(
+        mocker,
+        all_release_ids=[],
+        referenced_release_ids=[],
+    )
+
+    result = cleanup_orphaned_releases()
+
+    assert result["checked"] == 0
+    assert result["deleted"] == 0
+    assert result["errors"] == []
+    release_coll.delete.assert_not_called()
+
+
+def test_cleanup_handles_delete_error(mocker):
+    """A failing delete is recorded in errors but does not abort remaining deletions."""
+    _, release_coll, _ = _pb_for_cleanup(
+        mocker,
+        all_release_ids=["rel1", "rel2"],
+        referenced_release_ids=[],
+    )
+    # First delete raises; second succeeds
+    release_coll.delete.side_effect = [Exception("403 Forbidden"), None]
+
+    result = cleanup_orphaned_releases()
+
+    assert result["deleted"] == 1
+    assert len(result["errors"]) == 1
+    assert "rel1" in result["errors"][0]
