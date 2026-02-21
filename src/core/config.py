@@ -5,9 +5,9 @@ class Settings(BaseSettings):
     version: str = "3.0.0"
     
     # Internal APIs
-    pocketbase_url: str = "http://127.0.0.1:8090"
-    pocketbase_admin_email: str = "admin@example.com"
-    pocketbase_admin_password: str = "changeme123"
+    pocketbase_url: str = "http://127.0.0.1:8090" # Used as default if internal env not supplied
+    pocketbase_admin_email: str
+    pocketbase_admin_password: str
     
     # External APIs
     ollama_url: str = "http://10.0.2.100:5000"
