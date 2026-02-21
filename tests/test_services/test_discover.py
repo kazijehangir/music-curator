@@ -142,6 +142,7 @@ def test_extract_metadata_mp4_tags(tmp_path):
         '\xa9ART': ['Ali Sethi'],
         '\xa9alb': ['Lovely Bukhaar (Dolby Atmos Version)'],
     })
+    mock_f.__class__.__name__ = "MP4"
 
     with patch("src.services.discover.mutagen.File", return_value=mock_f):
         meta = extract_metadata(dummy)
@@ -162,6 +163,7 @@ def test_extract_metadata_vorbis_tags(tmp_path):
         'artist': ['Ali Sethi'],
         'album':  ['Coke Studio Season 14'],
     })
+    mock_f.__class__.__name__ = "FLAC"
     mock_f.info.bits_per_sample = 16
 
     with patch("src.services.discover.mutagen.File", return_value=mock_f):
@@ -190,6 +192,7 @@ def test_extract_metadata_id3_tags(tmp_path):
         'TPE1': make_id3_frame('Ali Sethi'),
         'TALB': make_id3_frame('Aatish'),
     })
+    mock_f.__class__.__name__ = "MP3"
 
     with patch("src.services.discover.mutagen.File", return_value=mock_f):
         meta = extract_metadata(dummy)
@@ -200,12 +203,48 @@ def test_extract_metadata_id3_tags(tmp_path):
     assert meta['codec'] == 'mp3'
 
 
+def test_extract_metadata_flac_uses_file_class_not_info_class(tmp_path):
+    """Regression: codec detection must use type(f).__name__, not type(f.info).__name__.
+    mutagen.FLAC has info class 'StreamInfo', not 'FLACInfo' — the old check
+    always fell through, leaving codec=None and causing 'lossy' verdicts."""
+    dummy = tmp_path / "track.flac"
+    dummy.touch()
+
+    mock_f = _make_mutagen_mock("StreamInfo", {})  # info class is StreamInfo
+    mock_f.__class__.__name__ = "FLAC"             # but file class is FLAC
+    mock_f.info.bits_per_sample = 24
+
+    with patch("src.services.discover.mutagen.File", return_value=mock_f):
+        meta = extract_metadata(dummy)
+
+    assert meta['codec'] == 'flac', (
+        "FLAC codec must be detected via the file-object class (FLAC), "
+        "not the info class (StreamInfo)"
+    )
+    assert meta['bit_depth'] == 24
+
+
+def test_extract_metadata_mp3_uses_file_class_not_info_class(tmp_path):
+    """Same regression for MP3: info class is 'MPEGInfo', not 'MP3Info'."""
+    dummy = tmp_path / "track.mp3"
+    dummy.touch()
+
+    mock_f = _make_mutagen_mock("MPEGInfo", {})
+    mock_f.__class__.__name__ = "MP3"
+
+    with patch("src.services.discover.mutagen.File", return_value=mock_f):
+        meta = extract_metadata(dummy)
+
+    assert meta['codec'] == 'mp3'
+
+
 def test_extract_metadata_returns_empty_strings_when_no_tags(tmp_path):
     """Files with no tags at all return empty strings, not None or crash."""
     dummy = tmp_path / "untagged.opus"
     dummy.touch()
 
     mock_f = _make_mutagen_mock("OggOpusInfo", {})
+    mock_f.__class__.__name__ = "OggOpus"
     mock_f.tags.__bool__ = lambda s: False  # simulate missing tags
 
     with patch("src.services.discover.mutagen.File", return_value=mock_f):

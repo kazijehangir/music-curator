@@ -30,6 +30,11 @@ def run_repair_metadata():
     result = repair_file_metadata()
     print(f"RESULT: {result}")
 
+def run_reanalyze_quality():
+    from src.services.analyze import reanalyze_quality
+    result = reanalyze_quality()
+    print(f"RESULT: {result}")
+
 def main():
     parser = argparse.ArgumentParser(description="Music Curator CLI")
     subparsers = parser.add_subparsers(dest="command")
@@ -38,6 +43,7 @@ def main():
     subparsers.add_parser("analyze", help="Run audio analysis")
     subparsers.add_parser("cleanup-releases", help="Delete orphaned music_release rows with no linked files")
     subparsers.add_parser("repair-metadata", help="Re-extract tags for files stored with empty metadata (' |  | ')")
+    subparsers.add_parser("reanalyze-quality", help="Re-run spectral ceiling + quality scoring for all files (use after algorithm changes)")
     # Future commands: tag, symlink, etc.
 
     args = parser.parse_args()
@@ -50,6 +56,8 @@ def main():
         run_cleanup_releases()
     elif args.command == "repair-metadata":
         run_repair_metadata()
+    elif args.command == "reanalyze-quality":
+        run_reanalyze_quality()
     else:
         parser.print_help()
         sys.exit(1)

@@ -13,6 +13,7 @@ from src.services.analyze import (
     calculate_quality_score,
     run_analysis,
     cleanup_orphaned_releases,
+    reanalyze_quality,
 )
 from src.core.schema import COLL_RELEASE, COLL_FILE, MusicFile
 import hashlib
@@ -98,22 +99,73 @@ def test_generate_acoustid_failure(tmp_path):
 
 # ── get_spectral_ceiling ──────────────────────────────────────────────────────
 
-def test_get_spectral_ceiling_success(tmp_path):
-    """Happy path: librosa returns a rolloff array and we return the mean."""
+def test_get_spectral_ceiling_genuine_lossless(tmp_path):
+    """Genuine lossless: highest bin above -60 dB is near Nyquist (~22 kHz)."""
     import numpy as np
 
     dummy_file = tmp_path / "track.flac"
     dummy_file.touch()
 
-    fake_audio = np.zeros(44100 * 15)
-    fake_rolloff = np.array([[18000.0, 19000.0, 20000.0]])
-    expected_mean = float(np.mean(fake_rolloff))
+    sr = 44100
+    fake_audio = np.zeros(sr * 15)
+    # Simulate a magnitude spectrum where the bin at index 1020 (≈22 kHz) is
+    # just above the -60 dB threshold and all higher bins are silent.
+    n_bins = 1025  # n_fft=2048 → 1025 rfft bins
+    fake_S = np.ones((n_bins, 10)) * 0.0001   # below threshold everywhere
+    fake_S[1020, :] = 1.0                      # strong signal at ~22 kHz
+    fake_freqs = np.linspace(0, sr / 2, n_bins)
 
-    with patch("src.services.analyze.librosa.load", return_value=(fake_audio, 44100)), \
-         patch("src.services.analyze.librosa.feature.spectral_rolloff", return_value=fake_rolloff):
+    with patch("src.services.analyze.librosa.load", return_value=(fake_audio, sr)), \
+         patch("src.services.analyze.librosa.stft", return_value=fake_S), \
+         patch("src.services.analyze.librosa.fft_frequencies", return_value=fake_freqs):
         result = get_spectral_ceiling(dummy_file)
 
-    assert result == pytest.approx(expected_mean)
+    assert result == pytest.approx(fake_freqs[1020])
+    assert result > 20000  # well above any upscale cutoff
+
+
+def test_get_spectral_ceiling_upscaled_flac(tmp_path):
+    """Upscaled FLAC: all energy below 16 kHz, ceiling reflects the hard cutoff."""
+    import numpy as np
+
+    dummy_file = tmp_path / "upscale.flac"
+    dummy_file.touch()
+
+    sr = 44100
+    fake_audio = np.zeros(sr * 15)
+    n_bins = 1025
+    # Energy only in bins 0-700 (~15 kHz), silence above
+    fake_S = np.zeros((n_bins, 10))
+    fake_S[:700, :] = 1.0
+    fake_freqs = np.linspace(0, sr / 2, n_bins)
+
+    with patch("src.services.analyze.librosa.load", return_value=(fake_audio, sr)), \
+         patch("src.services.analyze.librosa.stft", return_value=fake_S), \
+         patch("src.services.analyze.librosa.fft_frequencies", return_value=fake_freqs):
+        result = get_spectral_ceiling(dummy_file)
+
+    assert result == pytest.approx(fake_freqs[699])
+    assert result < 16000  # hard cutoff → fake verdict territory
+
+
+def test_get_spectral_ceiling_silent_file(tmp_path):
+    """A completely silent file returns 0.0 instead of raising."""
+    import numpy as np
+
+    dummy_file = tmp_path / "silent.flac"
+    dummy_file.touch()
+
+    sr = 44100
+    n_bins = 1025
+    fake_S = np.zeros((n_bins, 10))
+    fake_freqs = np.linspace(0, sr / 2, n_bins)
+
+    with patch("src.services.analyze.librosa.load", return_value=(np.zeros(sr * 15), sr)), \
+         patch("src.services.analyze.librosa.stft", return_value=fake_S), \
+         patch("src.services.analyze.librosa.fft_frequencies", return_value=fake_freqs):
+        result = get_spectral_ceiling(dummy_file)
+
+    assert result == 0.0
 
 
 def test_get_spectral_ceiling_failure(tmp_path):
@@ -457,3 +509,69 @@ def test_cleanup_handles_delete_error(mocker):
     assert result["deleted"] == 1
     assert len(result["errors"]) == 1
     assert "rel1" in result["errors"][0]
+
+
+# ── reanalyze_quality ──────────────────────────────────────────────────────────
+
+def test_reanalyze_quality_updates_codec_and_verdict(mocker, tmp_path):
+    """Re-scoring corrects stale quality fields — specifically codec=None that
+    caused 'lossy' verdicts for all FLAC files (broken class-name detection)."""
+    audio = tmp_path / "track.flac"
+    audio.write_bytes(b"\x00" * 64)
+
+    record = MagicMock()
+    record.id = "file_flac"
+    record.file_path = str(audio)
+
+    mock_pb = MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb)
+    mock_pb.collection.return_value.get_full_list.return_value = [record]
+
+    mocker.patch(
+        "src.services.discover.extract_metadata",
+        return_value={"codec": "flac", "bit_depth": 24, "bitrate": 3000000,
+                      "title": "Pasoori", "artist": "Ali Sethi", "album": "CS14",
+                      "sample_rate": 96000, "duration_seconds": 240.0},
+    )
+    mocker.patch("src.services.analyze.get_spectral_ceiling", return_value=26500.0)
+
+    result = reanalyze_quality()
+
+    assert result["processed"] == 1
+    assert result["errors"] == []
+
+    update_call = mock_pb.collection.return_value.update.call_args
+    updated_fields = update_call.args[1]
+    assert updated_fields[MusicFile.CODEC] == "flac"
+    assert updated_fields[MusicFile.QUALITY_VERDICT] == "authentic"
+    assert updated_fields[MusicFile.QUALITY_SCORE] == 100
+
+
+def test_reanalyze_quality_skips_missing_files(mocker, tmp_path):
+    """Files that no longer exist on disk are skipped and logged."""
+    record = MagicMock()
+    record.id = "file_gone"
+    record.file_path = str(tmp_path / "ghost.flac")
+
+    mock_pb = MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb)
+    mock_pb.collection.return_value.get_full_list.return_value = [record]
+
+    result = reanalyze_quality()
+
+    assert result["processed"] == 0
+    assert len(result["errors"]) == 1
+    mock_pb.collection.return_value.update.assert_not_called()
+
+
+def test_reanalyze_quality_empty_database(mocker):
+    """Empty database: nothing to process, no errors."""
+    mock_pb = MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb)
+    mock_pb.collection.return_value.get_full_list.return_value = []
+
+    result = reanalyze_quality()
+
+    assert result["processed"] == 0
+    assert result["errors"] == []
+    mock_pb.collection.return_value.update.assert_not_called()

@@ -53,16 +53,18 @@ def extract_metadata(filepath: Path) -> Dict[str, Any]:
                 meta['bitrate'] = getattr(f.info, 'bitrate', None)
                 meta['duration_seconds'] = getattr(f.info, 'length', None)
 
-                # Map codecs, sample_rate, bit_depth based on class
-                class_name = type(f.info).__name__
-                if class_name == 'OggOpusInfo':
-                    meta['codec'] = 'opus'
-                elif class_name == 'FLACInfo':
+                # Derive codec from the mutagen file-object type, not f.info.
+                # f.info class names vary (e.g. FLAC uses StreamInfo, MP3
+                # uses MPEGInfo) while the top-level class names are stable.
+                file_type = type(f).__name__
+                if file_type == 'FLAC':
                     meta['codec'] = 'flac'
                     meta['bit_depth'] = getattr(f.info, 'bits_per_sample', None)
-                elif class_name == 'MP3Info':
+                elif file_type == 'OggOpus':
+                    meta['codec'] = 'opus'
+                elif file_type == 'MP3':
                     meta['codec'] = 'mp3'
-                elif class_name == 'MP4Info':
+                elif file_type == 'MP4':
                     meta['codec'] = 'aac'
 
             if hasattr(f, 'tags') and f.tags:

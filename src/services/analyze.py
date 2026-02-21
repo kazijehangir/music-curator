@@ -60,21 +60,40 @@ def generate_acoustid(file_path: Path) -> Optional[str]:
 
 def get_spectral_ceiling(file_path: Path) -> Optional[float]:
     """
-    Computes the 99% spectral rolloff frequency to determine the true frequency ceiling.
-    Helps detect fake upscaled FLAC files.
+    Returns the highest frequency (Hz) with non-negligible energy in the file.
+
+    Uses the native sample rate so 96 kHz/192 kHz files are analysed correctly.
+    Only a 15-second mid-track snippet is loaded to keep the network transfer
+    from the NAS small and avoid kernel D-state hangs on CIFS mounts.
+
+    Method: compute the mean STFT magnitude per frequency bin, then return
+    the centre frequency of the highest bin whose mean is above -60 dB
+    relative to the peak.  This cleanly separates genuine lossless files
+    (content all the way to Nyquist) from upscales (hard cutoff at the
+    original codec's frequency ceiling, e.g. ~16 kHz for 128 kbps MP3).
+
+    The old approach (spectral_rolloff at 99th percentile) measured where
+    most of the *energy* lies, which is always in the lower frequencies for
+    music — giving false "suspicious" verdicts for authentic lossless files.
     """
     try:
-        # Load audio (downmix to mono, target sr=44100).
-        # Optimization: Only process a 15-second snippet from the middle (offset=30s)
-        # Analyzing the entire 5 minute file calculates millions of FFT frames and causes hangs
-        y, sr = librosa.load(str(file_path), sr=44100, mono=True, offset=30.0, duration=15.0)
-        
-        # Calculate spectral rolloff (99% of energy lies below this frequency)
-        rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr, roll_percent=0.99)
-        
-        # Average the rolloff frequencies across the track
-        avg_rolloff = float(np.mean(rolloff))
-        return avg_rolloff
+        # sr=None preserves the file's native sample rate (important for hi-res).
+        y, sr = librosa.load(str(file_path), sr=None, mono=True, offset=30.0, duration=15.0)
+
+        # Mean magnitude per frequency bin across all STFT frames.
+        S_mean = np.mean(np.abs(librosa.stft(y, n_fft=2048)), axis=1)
+
+        peak = float(np.max(S_mean))
+        if peak == 0:
+            return 0.0
+
+        # Threshold = -60 dB relative to peak (10^(-60/20) ≈ 0.001).
+        significant = np.where(S_mean > peak * 0.001)[0]
+        if len(significant) == 0:
+            return 0.0
+
+        freqs = librosa.fft_frequencies(sr=sr, n_fft=2048)
+        return float(freqs[int(significant[-1])])
     except Exception as e:
         logger.error(f"Failed to analyze spectral ceiling for {file_path}: {e}")
         return None
@@ -135,6 +154,63 @@ def calculate_quality_score(
         verdict = "lossy"
 
     return min(100, score), verdict
+
+def reanalyze_quality() -> Dict[str, Any]:
+    """
+    Re-runs spectral ceiling measurement and quality scoring for every file
+    in the database, updating codec, spectral_ceiling, quality_score, and
+    quality_verdict in place.
+
+    Does NOT re-fingerprint or touch release groupings — safe to run at any
+    time.  Use this after fixing the quality-scoring algorithm to back-fill
+    all existing records.
+    """
+    from src.services.discover import get_pb_client, extract_metadata
+
+    pb = get_pb_client()
+    stats = {"processed": 0, "errors": []}
+
+    all_files = pb.collection(COLL_FILE).get_full_list()
+    total = len(all_files)
+    print(f"STATUS: Re-scoring quality for {total} files.")
+
+    for i, record in enumerate(all_files):
+        file_path_str = getattr(record, MusicFile.FILE_PATH, None)
+        if not file_path_str:
+            continue
+
+        file_path = Path(file_path_str)
+        if not file_path.exists():
+            stats["errors"].append(f"File not found: {file_path_str}")
+            continue
+
+        print(f"STATUS: [{i+1}/{total}] {file_path.name}")
+        try:
+            # Re-extract codec and bit_depth (fixes stale null values).
+            meta = extract_metadata(file_path)
+            codec = meta.get("codec") or ""
+            bit_depth = meta.get("bit_depth")
+            bitrate = meta.get("bitrate")
+
+            ceiling = get_spectral_ceiling(file_path)
+            score, verdict = calculate_quality_score(codec, bitrate, bit_depth, ceiling)
+
+            pb.collection(COLL_FILE).update(record.id, {
+                MusicFile.CODEC: codec or None,
+                MusicFile.BIT_DEPTH: bit_depth,
+                MusicFile.SPECTRAL_CEILING: ceiling,
+                MusicFile.QUALITY_SCORE: score,
+                MusicFile.QUALITY_VERDICT: verdict,
+            })
+            stats["processed"] += 1
+        except Exception as e:
+            msg = f"Error re-scoring {file_path_str}: {e}"
+            logger.error(msg)
+            stats["errors"].append(msg)
+
+    print(f"STATUS: Done. Re-scored {stats['processed']} / {total} files.")
+    return stats
+
 
 def cleanup_orphaned_releases() -> Dict[str, Any]:
     """
