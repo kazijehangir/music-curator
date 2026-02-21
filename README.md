@@ -74,3 +74,37 @@ Open PocketBase's admin UI. Key workflows:
 ## Documentation
 
 See `notes/final-implementation-plan.md` for the full architecture spec: database schema, pipeline pseudocode, quality scoring algorithm, n8n workflow design, implementation roadmap, and risk register.
+
+## Project Structure
+```text
+src/
+├── api/          # Route handlers and main FastAPI config
+├── core/         # Pydantic Settings and configurations 
+├── models/       # PocketBase mappings
+└── services/     # Stubs for audio logic, db connectors, etc
+tests/            # pytest suite
+systemd/          # Service daemon specifications
+scripts/          # Setup and deployment scripts
+```
+
+## Running the API Locally
+1. Activate the environment: `source .venv/bin/activate`
+2. Run the application: `uvicorn src.api.main:app --reload`
+3. Visit the auto-generated docs at `http://127.0.0.1:8000/docs`
+
+## Existing Core Endpoints
+- `POST /api/discover`: Scans ingest directories for new files.
+- `POST /api/analyze`: Generates AcoustID and Quality scores.
+- `POST /api/tag`: Enriches metadata via Beets and Ollama.
+- `POST /api/symlink`: Renders the Active plex library.
+- `POST /api/mb/batch-submit`: Auto-submits MusicBrainz data.
+- `POST /api/mb/sync`: Fetches updated MBIDs.
+- `POST /api/release/{id}/reanalyze`: Manual trigger for updates.
+- `GET /api/health`: Validates the health of the system pipeline.
+
+## Systemd
+We use systemd to run this automatically. To deploy standard changes, use:
+`./scripts/deploy_service.sh`
+
+## Important Contribution Guidelines
+If you are an AI assistant or human modifying this project, you **MUST** review the rules outlined in `AGENT_RULES.md`.
