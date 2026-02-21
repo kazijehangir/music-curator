@@ -66,14 +66,95 @@ def extract_metadata(filepath: Path) -> Dict[str, Any]:
                     meta['codec'] = 'aac'
 
             if hasattr(f, 'tags') and f.tags:
-                meta['title'] = str(f.tags.get('title', [None])[0] or f.tags.get('TIT2', [None])[0] or "")
-                meta['artist'] = str(f.tags.get('artist', [None])[0] or f.tags.get('TPE1', [None])[0] or "")
-                meta['album'] = str(f.tags.get('album', [None])[0] or f.tags.get('TALB', [None])[0] or "")
+                def _get_tag(*keys) -> str:
+                    """Try each key in order; return the first non-empty string found."""
+                    for key in keys:
+                        val = f.tags.get(key)
+                        if val is not None:
+                            item = val[0] if isinstance(val, (list, tuple)) else val
+                            text = str(item).strip()
+                            if text:
+                                return text
+                    return ""
+
+                # Vorbis Comment (FLAC/OGG): lowercase keys
+                # ID3 (MP3):                 TIT2 / TPE1 / TALB
+                # MP4/M4A (AAC/ALAC):        ©nam / ©ART / ©alb  (© = \xa9)
+                meta['title']  = _get_tag('title',  'TIT2', '\xa9nam')
+                meta['artist'] = _get_tag('artist', 'TPE1', '\xa9ART')
+                meta['album']  = _get_tag('album',  'TALB', '\xa9alb')
             
     except Exception as e:
         print(f"Error extracting metadata from {filepath}: {e}")
         
     return meta
+
+def repair_file_metadata() -> Dict[str, Any]:
+    """
+    Re-extracts and writes metadata for music_file records whose raw_meta
+    field is blank (i.e. stored as ' |  | ').  This happens when the file
+    was first discovered before the tag-reading code supported that codec's
+    key format (e.g. MP4/M4A files that use ©nam/©ART/©alb keys).
+
+    Safe to re-run: it only touches records with empty metadata.
+    """
+    from src.core.schema import COLL_FILE, MusicFile
+
+    pb = get_pb_client()
+    stats = {"checked": 0, "repaired": 0, "errors": []}
+
+    EMPTY_COMBO = " |  | "
+    try:
+        records = pb.collection(COLL_FILE).get_full_list(
+            query_params={"filter": f"{MusicFile.RAW_META}='{EMPTY_COMBO}'"}
+        )
+    except Exception as e:
+        stats["errors"].append(f"Failed to fetch records: {e}")
+        return stats
+
+    stats["checked"] = len(records)
+    print(f"STATUS: Found {stats['checked']} files with empty metadata.")
+
+    for record in records:
+        file_path_str = getattr(record, MusicFile.FILE_PATH, None)
+        if not file_path_str:
+            continue
+        filepath = Path(file_path_str)
+        if not filepath.exists():
+            stats["errors"].append(f"File not found on disk: {file_path_str}")
+            continue
+
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                future = ex.submit(extract_metadata, filepath)
+                meta = future.result(timeout=FILE_TIMEOUT_SECONDS)
+        except concurrent.futures.TimeoutError:
+            stats["errors"].append(f"Timed out reading metadata for {file_path_str}")
+            continue
+        except Exception as e:
+            stats["errors"].append(f"Metadata error for {file_path_str}: {e}")
+            continue
+
+        raw_title  = meta.get('title')  or ""
+        raw_artist = meta.get('artist') or ""
+        raw_album  = meta.get('album')  or ""
+        new_combo  = f"{raw_title} | {raw_artist} | {raw_album}"
+
+        if new_combo == EMPTY_COMBO:
+            stats["errors"].append(f"Still no metadata after re-extraction: {file_path_str}")
+            continue
+
+        update_data = {MusicFile.RAW_META: new_combo}
+        if meta.get('codec'):
+            update_data['codec'] = meta['codec']
+
+        pb.collection(COLL_FILE).update(record.id, update_data)
+        print(f"STATUS: Repaired: {filepath.name} → {new_combo}")
+        stats["repaired"] += 1
+
+    print(f"STATUS: Done. Repaired {stats['repaired']} / {stats['checked']} files.")
+    return stats
+
 
 def run_discovery() -> Dict[str, Any]:
     """

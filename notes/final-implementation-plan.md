@@ -365,6 +365,7 @@ The Python compute service ships a CLI for one-off operational tasks that are no
 | `python -m src.cli discover` | Run file discovery manually. |
 | `python -m src.cli analyze` | Run audio analysis / fingerprinting manually. |
 | `python -m src.cli cleanup-releases` | Delete `music_release` rows that have no `music_file` pointing to them. Safe to re-run; prints a progress count and a final summary. |
+| `python -m src.cli repair-metadata` | Re-extract tags for `music_file` records stored with empty metadata (`' \| \| '`). Targets files whose tag format was not recognized at discovery time (e.g. M4A files using `©nam`/`©ART`/`©alb` MP4 keys). Safe to re-run. |
 
 ## 13. Risk Register
 
@@ -375,6 +376,7 @@ The Python compute service ships a CLI for one-off operational tasks that are no
 | **Plex symlink support** | High | Correct volume mounts in Docker. |
 | **LLM hallucination** | Med | Confidence capping and Pydantic validation. |
 | **Duplicate `music_release` rows** | Med | Fixed: analyze filter no longer uses PocketBase's `!~` (substring) operator as a regex; existing release assignment is preserved on re-analysis. Run `cleanup-releases` CLI command to purge any orphans already in the database. |
+| **Missing metadata for M4A files** | Low | Fixed: `extract_metadata` now reads MP4 atom keys (`©nam`/`©ART`/`©alb`) in addition to Vorbis Comment and ID3 keys. Run `repair-metadata` CLI command to back-fill records already in the database. |
 
 ## 14. Open Decisions
 

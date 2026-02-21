@@ -25,6 +25,11 @@ def run_cleanup_releases():
     result = cleanup_orphaned_releases()
     print(f"RESULT: {result}")
 
+def run_repair_metadata():
+    from src.services.discover import repair_file_metadata
+    result = repair_file_metadata()
+    print(f"RESULT: {result}")
+
 def main():
     parser = argparse.ArgumentParser(description="Music Curator CLI")
     subparsers = parser.add_subparsers(dest="command")
@@ -32,6 +37,7 @@ def main():
     subparsers.add_parser("discover", help="Run file discovery")
     subparsers.add_parser("analyze", help="Run audio analysis")
     subparsers.add_parser("cleanup-releases", help="Delete orphaned music_release rows with no linked files")
+    subparsers.add_parser("repair-metadata", help="Re-extract tags for files stored with empty metadata (' |  | ')")
     # Future commands: tag, symlink, etc.
 
     args = parser.parse_args()
@@ -42,6 +48,8 @@ def main():
         run_analyze()
     elif args.command == "cleanup-releases":
         run_cleanup_releases()
+    elif args.command == "repair-metadata":
+        run_repair_metadata()
     else:
         parser.print_help()
         sys.exit(1)
