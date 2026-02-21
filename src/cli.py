@@ -35,6 +35,11 @@ def run_reanalyze_quality():
     result = reanalyze_quality()
     print(f"RESULT: {result}")
 
+def run_symlink():
+    from src.services.symlink import run_symlink
+    result = run_symlink()
+    print(f"RESULT: {result}")
+
 def main():
     parser = argparse.ArgumentParser(description="Music Curator CLI")
     subparsers = parser.add_subparsers(dest="command")
@@ -44,7 +49,7 @@ def main():
     subparsers.add_parser("cleanup-releases", help="Delete orphaned music_release rows with no linked files")
     subparsers.add_parser("repair-metadata", help="Re-extract tags for files stored with empty metadata (' |  | ')")
     subparsers.add_parser("reanalyze-quality", help="Re-run spectral ceiling + quality scoring for all files (use after algorithm changes)")
-    # Future commands: tag, symlink, etc.
+    subparsers.add_parser("symlink", help="Create/update symlinks for primary files; remove stale ones")
 
     args = parser.parse_args()
 
@@ -58,6 +63,8 @@ def main():
         run_repair_metadata()
     elif args.command == "reanalyze-quality":
         run_reanalyze_quality()
+    elif args.command == "symlink":
+        run_symlink()
     else:
         parser.print_help()
         sys.exit(1)

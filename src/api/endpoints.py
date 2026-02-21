@@ -28,9 +28,12 @@ async def tag_files() -> Dict[str, Any]:
     return {"status": "accepted", "tagged": 0, "mb_matched": 0, "message": "Tagging skeleton"}
 
 @router.post("/symlink")
-async def create_symlinks() -> Dict[str, Any]:
+async def create_symlinks(request: Request):
     """Rebuilds the active library path using symlinks to the best files."""
-    return {"status": "accepted", "created": 0, "plex_scan_triggered": False, "message": "Symlink skeleton"}
+    return StreamingResponse(
+        task_manager.run_task("symlink", "/api/symlink", request),
+        media_type="text/plain"
+    )
 
 @router.post("/mb/batch-submit")
 async def musicbrainz_submit() -> Dict[str, Any]:
