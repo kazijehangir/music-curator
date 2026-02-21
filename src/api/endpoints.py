@@ -1,24 +1,25 @@
 from fastapi import APIRouter
 from typing import Dict, Any
+import asyncio
 
 router = APIRouter()
 
 @router.post("/discover")
-def discover_new_files() -> Dict[str, Any]:
+async def discover_new_files() -> Dict[str, Any]:
     """Scans the ingest directories and inserts new files into the database."""
     from src.services.discover import run_discovery
-    
+
     try:
-        result = run_discovery()
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, run_discovery)
         return {
-            "status": "success", 
-            "new_files": result["new_files"], 
+            "status": "success",
+            "new_files": result["new_files"],
             "updated_files": result["updated_files"],
             "errors": result["errors"]
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
 @router.post("/analyze")
 def analyze_files() -> Dict[str, Any]:
     """Generates AcoustID fingerprints, Librosa quality scores, and groups by release."""

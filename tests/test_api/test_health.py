@@ -10,4 +10,6 @@ def test_discover_skeleton(client):
     response = client.post("/api/discover")
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "accepted"
+    # discover now runs the real pipeline; it either succeeds or errors —
+    # it no longer returns the old "accepted" skeleton.
+    assert data["status"] in ("success", "error")

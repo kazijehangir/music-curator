@@ -1,29 +1,36 @@
 import os
-import hashlib
+import concurrent.futures
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any
 import mutagen
 from pocketbase import PocketBase
-from pocketbase.client import FileUpload
 
 from src.core.config import settings
+
+# Seconds to allow for mutagen metadata extraction per file before giving up.
+# Applies as a safety net — stat_fingerprint itself is near-instant.
+FILE_TIMEOUT_SECONDS = 30
+
 
 def get_pb_client() -> PocketBase:
     client = PocketBase(settings.pocketbase_url)
     client.admins.auth_with_password(
-        settings.pocketbase_admin_email, 
+        settings.pocketbase_admin_email,
         settings.pocketbase_admin_password
     )
     return client
 
-def hash_file(filepath: Path) -> str:
-    """Calculate SHA256 hash of a file."""
-    sha256_hash = hashlib.sha256()
-    with open(filepath, "rb") as f:
-        # Read and update hash string value in blocks of 4K
-        for byte_block in iter(lambda: f.read(4096), b""):
-            sha256_hash.update(byte_block)
-    return sha256_hash.hexdigest()
+
+def stat_fingerprint(filepath: Path) -> str:
+    """
+    Returns a lightweight change-detection fingerprint using only os.stat().
+
+    Uses (file size, mtime_ns) — a single syscall with zero file reads.
+    This avoids reading FLAC data over CIFS, which was causing kernel D-state hangs.
+    Sufficient for detecting file changes; SHA-256 is unnecessary for this purpose.
+    """
+    s = filepath.stat()
+    return f"{s.st_size}:{s.st_mtime_ns}"
 
 def extract_metadata(filepath: Path) -> Dict[str, Any]:
     """Extract audio metadata using mutagen."""
@@ -97,41 +104,51 @@ def run_discovery() -> Dict[str, Any]:
                     continue
                     
                 try:
-                    file_hash = hash_file(filepath)
-                    
+                    # stat_fingerprint uses os.stat() only — zero file reads, no CIFS blocking.
+                    file_fingerprint = stat_fingerprint(filepath)
+
                     # Check if file exists in PocketBase
                     file_path_str = str(filepath)
-                    # Note: pocketbase filter syntax requires escaping single quotes by duplicating them or using parameter binding if supported.
-                    # Since python SDK uses simple strings, we escape single quotes.
                     safe_path_str = file_path_str.replace("'", "\\'")
                     records = pb.collection('music_file').get_list(
                         1, 1, {"filter": f"file_path='{safe_path_str}'"}
                     )
-                    
+
                     if records.items:
-                        # File exists, check if hash changed
+                        # File exists — check if size/mtime changed
                         existing_record = records.items[0]
-                        # Use getattr() for pocketbase python sdk custom records which use setattr
-                        existing_hash = getattr(existing_record, 'file_hash', None)
-                        if existing_hash != file_hash:
+                        existing_fp = getattr(existing_record, 'file_hash', None)
+                        if existing_fp != file_fingerprint:
                             pb.collection('music_file').update(existing_record.id, {
-                                'file_hash': file_hash,
-                                'quality_score': None  # Reset quality score
+                                'file_hash': file_fingerprint,
+                                'quality_score': None  # Reset so analyze re-runs
                             })
                             updated_files_count += 1
                     else:
-                        # New file
-                        meta = extract_metadata(filepath)
+                        # New file — extract metadata with a timeout safety net.
+                        # mutagen reads audio headers (fast), but on a stalled CIFS mount
+                        # it can block. We abort after FILE_TIMEOUT_SECONDS.
+                        try:
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                                future = ex.submit(extract_metadata, filepath)
+                                meta = future.result(timeout=FILE_TIMEOUT_SECONDS)
+                        except concurrent.futures.TimeoutError:
+                            errors.append(
+                                f"Timed out reading metadata for {filepath} "
+                                f"(>{FILE_TIMEOUT_SECONDS}s) — skipping"
+                            )
+                            continue
+
                         raw_title = meta.get('title') or ""
                         raw_artist = meta.get('artist') or ""
                         raw_album = meta.get('album') or ""
-                        
+
                         raw_combo = f"{raw_title} | {raw_artist} | {raw_album}"
-                        
+
                         pb.collection('music_file').create({
                             'source_dir': dir_name,
                             'file_path': file_path_str,
-                            'file_hash': file_hash,
+                            'file_hash': file_fingerprint,
                             'raw_title__raw_artist__raw_album': raw_combo,
                             'codec': meta['codec'],
                             'sample_rate': meta['sample_rate'],
@@ -141,9 +158,10 @@ def run_discovery() -> Dict[str, Any]:
                             'is_primary': False
                         })
                         new_files_count += 1
-                        
+
                 except Exception as e:
                     errors.append(f"Error processing {filepath}: {str(e)}")
+
 
     return {
         "status": "success",
