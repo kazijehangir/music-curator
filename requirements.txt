@@ -6,3 +6,4 @@ pocketbase>=0.10.0
 pytest>=8.1.1
 pytest-asyncio>=0.23.6
 pyfakefs>=5.3.5
+mutagen>=1.47.0

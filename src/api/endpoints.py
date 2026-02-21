@@ -4,9 +4,20 @@ from typing import Dict, Any
 router = APIRouter()
 
 @router.post("/discover")
-async def discover_new_files() -> Dict[str, Any]:
+def discover_new_files() -> Dict[str, Any]:
     """Scans the ingest directories and inserts new files into the database."""
-    return {"status": "accepted", "new_files": 0, "message": "Discovery skeleton"}
+    from src.services.discover import run_discovery
+    
+    try:
+        result = run_discovery()
+        return {
+            "status": "success", 
+            "new_files": result["new_files"], 
+            "updated_files": result["updated_files"],
+            "errors": result["errors"]
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @router.post("/analyze")
 async def analyze_files() -> Dict[str, Any]:
