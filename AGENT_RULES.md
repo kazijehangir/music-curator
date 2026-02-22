@@ -11,3 +11,4 @@ To ensure long-term maintainability, all future AI agents (and human contributor
 7. **No Dependency Downgrades**: When evaluating syntax or API problems (especially with newer versions of libraries like PocketBase), NEVER downgrade to an older version of some library or dependency as an attempt to fix the issue. Find the correct syntax for the current version.
 8. **Hermetic E2E Tests**: E2E tests MUST run against actual external services (e.g., LM Studio/Ollama) to ensure realism. Do NOT mock external dependencies in `tests/integration/test_pipeline_e2e.py`. State should be hermetic (using temporary directories and isolated database instances), but functional logic must be real.
 9. **Local Python Environment**: ALWAYS use the local python environment (`.venv`) within the project directory when running any python commands or scripts.
+10. **No Large Binaries**: Never commit real music files (>1MB) to Git. Use small generated silence files for CI specimens.

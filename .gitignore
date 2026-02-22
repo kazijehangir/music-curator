@@ -2,3 +2,15 @@
 .env
 __pycache__/
 uvicorn.log
+
+# Test Media Assets
+tests/integration/data/*.flac
+tests/integration/data/*.opus
+tests/integration/data/*.mp3
+tests/integration/data/*.m4a
+tests/integration/data/*.aac
+tests/integration/data/*.ogg
+tests/integration/data/*.wav
+
+# Allow test configuration
+!tests/integration/data/testdata_config.json
