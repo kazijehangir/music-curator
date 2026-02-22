@@ -19,13 +19,14 @@ CONF_FILE_TAGS = 80
 CONF_LLM = 70
 CONF_SIDECAR = 60
 
-def run_tagging() -> Dict[str, Any]:
+def run_tagging(pb: Optional[Any] = None) -> Dict[str, Any]:
     """
     Main entrypoint for the /api/tag endpoint.
     Retrieves all releases that need tagging and runs the 3-pass pipeline.
     """
-    from src.services.discover import get_pb_client
-    pb = get_pb_client()
+    if pb is None:
+        from src.services.discover import get_pb_client
+        pb = get_pb_client()
     
     stats = {"tagged": 0, "mb_matched": 0, "llm_processed": 0, "errors": []}
     
@@ -116,6 +117,7 @@ def _pass_2_sidecars(pb, release_id: str, files: List[Any]):
                     
                 title = data.get('track') or data.get('title')
                 artist = data.get('artist') or data.get('uploader')
+                album = data.get('album')
                 
                 if title:
                     pb.collection(COLL_METADATA_SOURCE).create({
@@ -133,6 +135,14 @@ def _pass_2_sidecars(pb, release_id: str, files: List[Any]):
                         MetadataSource.VALUE: artist,
                         MetadataSource.CONFIDENCE: CONF_SIDECAR
                     })
+                if album:
+                    pb.collection(COLL_METADATA_SOURCE).create({
+                        MetadataSource.FILE: file_record.id,
+                        MetadataSource.SOURCE: "info_json",
+                        MetadataSource.FIELD_NAME: Release.ALBUM,
+                        MetadataSource.VALUE: album,
+                        MetadataSource.CONFIDENCE: CONF_SIDECAR
+                    })
             except Exception as e:
                 logger.error(f"Failed to read info.json for {file_path}: {e}")
 
@@ -140,6 +150,11 @@ def _pass_3_llm(pb, release_id: str, primary_file, stats: Dict[str, Any]):
     # Get raw metadata (e.g. filename or raw mutagen tags)
     raw_meta = getattr(primary_file, MusicFile.RAW_META, None)
     if not raw_meta:
+        return
+        
+    # Skip if metadata is effectively empty (e.g. " |  | ")
+    if not raw_meta.replace('|', '').strip():
+        logger.debug(f"Skipping LLM for {release_id} as raw_meta is empty: '{raw_meta}'")
         return
         
     prompt = f"Parse the following raw music track metadata into title, artist, album, genre, and language: '{raw_meta}'. Ensure to transliterate south asian text to Latin script."
@@ -163,18 +178,28 @@ def _pass_3_llm(pb, release_id: str, primary_file, stats: Dict[str, Any]):
         response.raise_for_status()
         result = response.json()
         
-        # Parse output
+        # Parse output with robust error handling
+        if 'choices' not in result or not result['choices']:
+            logger.error(f"LLM response missing 'choices': {result}")
+            return
+
         content = result['choices'][0]['message']['content']
         content = content.strip()
+        
+        # Strip markdown code blocks if present
         if content.startswith("```json"):
-            content = content[7:]
+            content = content[len("```json"):]
         elif content.startswith("```"):
             content = content[3:]
         if content.endswith("```"):
             content = content[:-3]
         content = content.strip()
         
-        parsed = LLMMetadataResponse.model_validate_json(content)
+        try:
+            parsed = LLMMetadataResponse.model_validate_json(content)
+        except Exception as ve:
+            logger.error(f"Failed to validate LLM JSON for {release_id}: {ve}\nContent: {content}")
+            return
         
         # Save results to PocketBase
         fields_to_save = {

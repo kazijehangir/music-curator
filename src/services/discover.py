@@ -1,7 +1,7 @@
 import os
 import concurrent.futures
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import mutagen
 from pocketbase import PocketBase
 
@@ -158,13 +158,14 @@ def repair_file_metadata() -> Dict[str, Any]:
     return stats
 
 
-def run_discovery() -> Dict[str, Any]:
+def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list[str]] = None) -> Dict[str, Any]:
     """
     Scans the ingest directories and inserts new files into PocketBase.
     Reads from the configured base ingest path.
     """
     base_path = Path(settings.ingest_base_path)
-    pb = get_pb_client()
+    if pb is None:
+        pb = get_pb_client()
     
     new_files_count = 0
     updated_files_count = 0
@@ -173,7 +174,8 @@ def run_discovery() -> Dict[str, Any]:
     # Supported audio extensions
     VALID_EXTS = {'.flac', '.opus', '.mp3', '.m4a', '.aac', '.ogg', '.wav'}
 
-    ingest_folders = [d.strip() for d in settings.ingest_dirs.split(',')]
+    if ingest_folders is None:
+        ingest_folders = [d.strip() for d in settings.ingest_dirs.split(',')]
 
     for dir_name in ingest_folders:
         ingest_path = base_path / dir_name
@@ -185,6 +187,7 @@ def run_discovery() -> Dict[str, Any]:
             for file in files:
                 filepath = Path(root) / file
                 if filepath.suffix.lower() not in VALID_EXTS:
+                    print(f"DEBUG: Skipping {filepath.name} with suffix {filepath.suffix}")
                     continue
                     
                 try:
@@ -244,6 +247,7 @@ def run_discovery() -> Dict[str, Any]:
                         new_files_count += 1
 
                 except Exception as e:
+                    print(f"DEBUG: Processing error for {filepath.name}: {e}")
                     errors.append(f"Error processing {filepath}: {str(e)}")
 
 

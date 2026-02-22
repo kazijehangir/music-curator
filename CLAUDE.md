@@ -198,3 +198,4 @@ The Python service has no database of its own — PocketBase is the single sourc
 ## Development Standards
 
 - **Markdown Quality**: Every time a Markdown (`.md`) file is created or modified, you MUST run `npx markdownlint-cli --fix <file>` to ensure it adheres to style standards. Fix any remaining warnings manually.
+- **Agent Rules**: All AI agents MUST read and strictly adhere to the rules defined in [AGENT_RULES.md](AGENT_RULES.md).

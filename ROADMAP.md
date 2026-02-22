@@ -18,9 +18,9 @@ This file tracks the implementation progress of the Music Curator pipeline based
 
 ## Phase 3: Symlinks + Plex (Days 15–19)
 
-* [ ] **Symlink Manager**: Create paths in `/media/Music/` pointing to primary files.
+* [x] **Symlink Manager**: Create paths in `/media/Music/` pointing to primary files.
 * [ ] **Plex Integration**: Trigger Plex library scans.
-* [ ] **Connect `/api/symlink`**.
+* [x] **Connect `/api/symlink`**.
 
 ## Phase 4: Metadata Intelligence (Days 20–26)
 

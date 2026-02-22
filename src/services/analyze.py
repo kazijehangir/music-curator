@@ -260,19 +260,20 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     return stats
 
 
-def run_analysis() -> Dict[str, Any]:
+def run_analysis(pb: Optional[Any] = None) -> Dict[str, Any]:
     """
     Full pipeline to analyze un-fingerprinted files in PocketBase, 
     score them, and deduplicate into releases.
     """
     from src.core.config import settings
-    from pocketbase import PocketBase
     
-    pb = PocketBase(settings.pocketbase_url)
-    pb.admins.auth_with_password(
-        settings.pocketbase_admin_email, 
-        settings.pocketbase_admin_password
-    )
+    if pb is None:
+        from pocketbase import PocketBase
+        pb = PocketBase(settings.pocketbase_url)
+        pb.admins.auth_with_password(
+            settings.pocketbase_admin_email, 
+            settings.pocketbase_admin_password
+        )
     
     # Track stats
     stats = {"analyzed": 0, "new_releases": 0, "merged_files": 0, "errors": []}

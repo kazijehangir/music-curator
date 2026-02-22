@@ -1,0 +1,18 @@
+[
+    {
+        "test_file": "real_song_1.flac",
+        "mock_sidecar": {
+            "title": "Acoustic Silence",
+            "artist": "John Doe",
+            "album": "The Sound of Nothing"
+        },
+        "expectations": {
+            "expected_title": "Acoustic Silence",
+            "expected_artist": "John Doe",
+            "expected_album": "The Sound of Nothing",
+            "expected_genre": "Unknown",
+            "expected_quality_verdict": "authentic",
+            "expected_acoustid_fp": "xxxxxxx"
+        }
+    }
+]

@@ -1,5 +1,8 @@
 # Music Curator Pipeline
 
+> [!IMPORTANT]
+> All AI agents MUST read and strictly adhere to the rules defined in [AGENT_RULES.md](AGENT_RULES.md).
+
 This project is a self-hosted curation pipeline specializing in Pakistani and South Asian music. It automates the process of ingestion, audio forensics, metadata normalization, and library management.
 
 ## 1. Project Overview
@@ -48,8 +51,8 @@ The system follows a **Three-Layer Architecture** where each component has disti
 
 * **Stateless Compute**: The Python service has no database; it treats PocketBase as the single source of truth. Task execution state is transient and managed via process groups.
 * **Dual-Layer Observability**:
-    * **n8n Status**: Filtered real-time stream for orchestration (yields only `STATUS:`, `RESULT:`, `ERROR:`).
-    * **Technical Log**: Persistent rotating log at `/tmp/music-curator.log` for deep debugging (captures everything).
+  * **n8n Status**: Filtered real-time stream for orchestration (yields only `STATUS:`, `RESULT:`, `ERROR:`).
+  * **Technical Log**: Persistent rotating log at `/tmp/music-curator.log` for deep debugging (captures everything).
 * **Non-Destructive**: Never delete or modify source audio files (unless tagging metadata in the primary file). Use symlinks for the user-facing library.
 * **Signal over Tags**: Trust spectral analysis (`librosa`) over container formats or stated bitrates for quality assessment.
 * **Confidence-Based Metadata**: Use the `metadata_sources` hierarchy to resolve conflicts (Manual > MusicBrainz > LLM > Raw Tags).
