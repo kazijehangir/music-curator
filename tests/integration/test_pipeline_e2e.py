@@ -137,10 +137,10 @@ def test_discover_filter_by_path(pocketbase_server):
     pb = pocketbase_server
     test_path = "/tmp/test_filter_song.flac"
 
-    rec = pb.collection(COLL_FILE).create({"file_path": test_path, "codec": "flac"})
+    rec = pb.collection(COLL_FILE).create({MusicFile.FILE_PATH: test_path, MusicFile.CODEC: "flac"})
     try:
         result = pb.collection(COLL_FILE).get_list(
-            1, 1, {"filter": f"file_path='{test_path}'"}
+            1, 1, {"filter": f"{MusicFile.FILE_PATH}='{test_path}'"}
         )
         assert result.total_items == 1, (
             f"Filter returned {result.total_items} items, expected 1. "
