@@ -1,6 +1,7 @@
 import logging
 import json
 import httpx
+import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -86,7 +87,10 @@ def process_release(pb, release, stats: Dict[str, Any]) -> bool:
     # Pass 3: LLM Normalization (If no high confidence matches exist yet, e.g. from Pass 1)
     # If no MB ID was matched, we rely heavily on LLM
     if not mb_id:
+        print(f"DEBUG: Starting Pass 3 (LLM) for release {release.id}")
         _pass_3_llm(pb, release.id, primary_file, stats)
+    else:
+        print(f"DEBUG: Skipping Pass 3 (LLM) because MB match exists: {mb_id}")
     
     # Final step: Resolve best metadata and write to tags
     _resolve_and_write_tags(pb, release.id, primary_file)
@@ -97,8 +101,26 @@ def process_release(pb, release, stats: Dict[str, Any]) -> bool:
     return True
 
 def _pass_1_beets(primary_file) -> Optional[str]:
-    # Placeholder for actual beets integration
-    # Ideally runs `beet import -q` on the primary_file.file_path and extracts the MBID
+    file_path = getattr(primary_file, MusicFile.FILE_PATH, None)
+    if not file_path:
+        return None
+        
+    try:
+        beet_bin = str(Path(sys.executable).parent / "beet")
+        cmd = [beet_bin, "import", "-q", "-C", "-s", str(file_path)]
+        subprocess.run(cmd, capture_output=True, text=True)
+        
+        f = mutagen.File(file_path)
+        if f is not None:
+            # Check common MusicBrainz tags across codecs
+            tags_to_check = ['musicbrainz_trackid', 'TXXX:MusicBrainz Release Track Id', '----:com.apple.iTunes:MusicBrainz Track Id']
+            for tag in tags_to_check:
+                if tag in f:
+                    val = f[tag]
+                    return str(val[0] if isinstance(val, list) else val)
+    except Exception as e:
+        logger.error(f"Beets pass failed for {file_path}: {e}")
+        
     return None
 
 def _pass_2_sidecars(pb, release_id: str, files: List[Any]):
@@ -147,31 +169,82 @@ def _pass_2_sidecars(pb, release_id: str, files: List[Any]):
                 logger.error(f"Failed to read info.json for {file_path}: {e}")
 
 def _pass_3_llm(pb, release_id: str, primary_file, stats: Dict[str, Any]):
-    # Get raw metadata (e.g. filename or raw mutagen tags)
-    raw_meta = getattr(primary_file, MusicFile.RAW_META, None)
-    if not raw_meta:
-        return
+    # Find the best metadata we have gathered so far (e.g., from sidecars)
+    try:
+        sources = pb.collection(COLL_METADATA_SOURCE).get_full_list(
+            query_params={"filter": f"{MetadataSource.FILE}='{primary_file.id}'"}
+        )
+        best_tags = {}
+        highest_conf = {}
+        for s in sources:
+            field = getattr(s, MetadataSource.FIELD_NAME, None)
+            conf = getattr(s, MetadataSource.CONFIDENCE, 0)
+            val = getattr(s, MetadataSource.VALUE, None)
+            if field and val:
+                if field not in highest_conf or conf > highest_conf[field]:
+                    highest_conf[field] = conf
+                    best_tags[field] = val
+    except Exception as e:
+        logger.error(f"Error fetching existing metadata for LLM pass: {e}")
+        best_tags = {}
+
+    current_title = best_tags.get(Release.TITLE, "")
+    current_artist = best_tags.get(Release.ARTIST, "")
+    current_album = best_tags.get(Release.ALBUM, "")
+
+    input_text = ""
+    if current_title or current_artist or current_album:
+        input_text = f"Title: {current_title} | Artist: {current_artist} | Album: {current_album}"
+        print(f"DEBUG: Using gathered metadata for LLM: '{input_text}'")
+    else:
+        # Get raw metadata (e.g. filename or raw mutagen tags)
+        raw_meta = getattr(primary_file, MusicFile.RAW_META, None)
+        print(f"DEBUG: Raw meta for {primary_file.id}: '{raw_meta}'")
         
-    # Skip if metadata is effectively empty (e.g. " |  | ")
-    if not raw_meta.replace('|', '').strip():
-        logger.debug(f"Skipping LLM for {release_id} as raw_meta is empty: '{raw_meta}'")
-        return
+        # If raw_meta is missing or empty, fallback to the current release title 
+        # (which often holds the filename stem if untagged).
+        if not raw_meta or not raw_meta.replace('|', '').strip():
+            try:
+                rel = pb.collection(COLL_RELEASE).get_one(release_id)
+                raw_meta = f"{getattr(rel, Release.TITLE, '')} | {getattr(rel, Release.ARTIST, '')} | {getattr(rel, Release.ALBUM, '')}"
+                print(f"DEBUG: Using fallback raw_meta from release: '{raw_meta}'")
+            except Exception as e:
+                print(f"DEBUG: Fallback failed: {e}")
+                return
+                
+        if not raw_meta.replace('|', '').strip():
+            print("DEBUG: Even fallback meta is empty, skipping LLM")
+            return
+        input_text = raw_meta
         
-    prompt = f"Parse the following raw music track metadata into title, artist, album, genre, and language: '{raw_meta}'. Ensure to transliterate south asian text to Latin script."
+    prompt = (
+        f"Analyze the following raw music track metadata: '{input_text}'. "
+        "Return a JSON object with 'title', 'artist', 'album', 'genre', and 'language'.\n"
+        "RULES:\n"
+        "1. Context: This is primarily a Pakistani/South Asian music library. Use your knowledge to infer the artist and correct genre.\n"
+        "2. Genre: INFER the genre based on the artist/title. Examples: 'Sufi Qawwali' (e.g. Abida Parveen, Ali Sethi, Nusrat Fateh Ali Khan), 'Urdu Hip Hop' (e.g. aleemrk, Talha Anjum), 'Pop', 'Ghazal', 'Rock'. DO NOT output generic terms like 'Unknown' or 'Music'.\n"
+        "3. Language: Infer the language (e.g. 'Urdu', 'Punjabi', 'Hindi').\n"
+        "4. Title Case: Apply proper title case (e.g. 'HASRAT' -> 'Hasrat').\n"
+        "5. Cleanup: Transliterate to Latin script. Remove meaningless garbage like '(Official Audio)', '[128kbps]', or 'Music Video'."
+    )
     
     payload = {
-        "model": "llama-3.1-8b", # Requires checking user's exact model
+        "model": "openai/gpt-oss-20b", # Requires checking user's exact model
         "messages": [
             {"role": "system", "content": "You are a music metadata parsing assistant. Return a JSON object containing keys: 'title', 'artist', 'album', 'genre', 'language'."},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.0,
-        "response_format": {"type": "json_object"} # Use json_object response format
+        "temperature": 0.0
     }
     
     try:
+        # Robustly ensure /v1 suffix if missing in settings
+        base_url = settings.lm_studio_url.rstrip('/')
+        if not base_url.endswith('/v1'):
+            base_url += '/v1'
+            
         response = httpx.post(
-            f"{settings.lm_studio_url}/chat/completions",
+            f"{base_url}/chat/completions",
             json=payload,
             timeout=45.0
         )

@@ -93,7 +93,9 @@ def get_spectral_ceiling(file_path: Path) -> Optional[float]:
             return 0.0
 
         freqs = librosa.fft_frequencies(sr=sr, n_fft=2048)
-        return float(freqs[int(significant[-1])])
+        ceiling = float(freqs[int(significant[-1])])
+        print(f"DEBUG: Spectral ceiling for {file_path.name}: {ceiling:.2f} Hz")
+        return ceiling
     except Exception as e:
         logger.error(f"Failed to analyze spectral ceiling for {file_path}: {e}")
         return None
@@ -143,11 +145,11 @@ def calculate_quality_score(
     # 3. Verdict Logic (Detecting fake upscales)
     if codec in ['flac', 'alac', 'wav']:
         # True lossless should generally peak over 19-20kHz.
-        # If a FLAC cuts off drastically at 16kHz, it's almost certainly a 128kbps MP3 upscale.
-        if spectral_ceiling and spectral_ceiling < 16500:
+        # If a FLAC cuts off drastically at 15kHz, it's almost certainly a 128kbps MP3 upscale.
+        if spectral_ceiling and spectral_ceiling < 15500:
             score = max(0, score - 50) # Penalize heavily
             verdict = "fake"
-        elif spectral_ceiling and spectral_ceiling < 19000:
+        elif spectral_ceiling and spectral_ceiling < 16500:
             score = max(0, score - 20)
             verdict = "suspicious"
     else:

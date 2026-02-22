@@ -1,18 +1,40 @@
 [
     {
-        "test_file": "real_song_1.flac",
-        "mock_sidecar": {
-            "title": "Acoustic Silence",
-            "artist": "John Doe",
-            "album": "The Sound of Nothing"
-        },
+        "test_file": "1. aleemrk - Hasrat.flac",
         "expectations": {
-            "expected_title": "Acoustic Silence",
-            "expected_artist": "John Doe",
-            "expected_album": "The Sound of Nothing",
-            "expected_genre": "Unknown",
+            "expected_title": "Hasrat",
+            "expected_artist": "aleemrk",
+            "expected_album": "Hasrat",
+            "expected_quality_verdict": "fake",
+            "expected_genre": "Urdu Hip Hop"
+        }
+    },
+    {
+        "test_file": "1. Abida Parveen, Ali Sethi - Aaqa - Coke Studio Season 9.flac",
+        "expectations": {
+            "expected_title": "Aaqa",
+            "expected_artist": "Abida Parveen & Ali Sethi",
+            "expected_album": "Coke Studio Season 9",
             "expected_quality_verdict": "authentic",
-            "expected_acoustid_fp": "xxxxxxx"
+            "expected_genre": "Sufi Qawwali"
+        }
+    },
+    {
+        "test_file": "HASRAT - aleemrk (Official Audio) - aleemrk.opus",
+        "expectations": {
+            "expected_title": "Hasrat",
+            "expected_artist": "aleemrk",
+            "expected_quality_verdict": "lossy",
+            "expected_genre": "Urdu Hip Hop"
+        }
+    },
+    {
+        "test_file": "Tum Aik Gorakh Dhanda Ho - Nescafe Basement.opus",
+        "expectations": {
+            "expected_title": "Tum Aik Gorakh Dhanda Ho",
+            "expected_album": "Nescafe Basement",
+            "expected_quality_verdict": "lossy",
+            "expected_genre": "Sufi Qawwali"
         }
     }
 ]
