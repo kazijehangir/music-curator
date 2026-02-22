@@ -165,11 +165,14 @@ def _pass_3_llm(pb, release_id: str, primary_file, stats: Dict[str, Any]):
         
         # Parse output
         content = result['choices'][0]['message']['content']
-        # Try to parse as JSON
+        content = content.strip()
         if content.startswith("```json"):
-            content = content.strip("```json").strip("```")
+            content = content[7:]
         elif content.startswith("```"):
-            content = content.replace("```", "")
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
         
         parsed = LLMMetadataResponse.model_validate_json(content)
         
@@ -194,7 +197,9 @@ def _pass_3_llm(pb, release_id: str, primary_file, stats: Dict[str, Any]):
         stats["llm_processed"] += 1
                 
     except Exception as e:
-        logger.error(f"LLM normalization failed for {raw_meta}: {e}")
+        msg = f"LLM normalization failed for {raw_meta}: {e}"
+        logger.error(msg)
+        stats.setdefault("errors", []).append(msg)
 
 def _resolve_and_write_tags(pb, release_id: str, primary_file):
     # Query all metadata sources using primary file ID

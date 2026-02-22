@@ -37,7 +37,7 @@ def test_pass_3_llm(mock_pocketbase, mock_httpx):
     mock_post_resp.json.return_value = {
         "choices": [{
             "message": {
-                "content": '{"title": "Cleaned Title", "artist": "Cleaned Artist", "album": null, "genre": "Pop", "language": "urd"}'
+                "content": '```json\n{"title": "Cleaned Title", "artist": "Cleaned Artist", "album": null, "genre": "Pop", "language": "urd"}\n```'
             }
         }]
     }
