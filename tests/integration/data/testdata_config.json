@@ -6,7 +6,11 @@
             "expected_artist": "aleemrk",
             "expected_album": "Hasrat",
             "expected_quality_verdict": "fake",
-            "expected_genre": "Urdu Hip Hop"
+            "expected_genre": "Urdu Hip Hop",
+            "expected_codec": "flac",
+            "expected_source_dir": "yubal",
+            "expected_mb_status": "unknown",
+            "expected_is_primary": true
         }
     },
     {
@@ -16,7 +20,11 @@
             "expected_artist": "Abida Parveen, Ali Sethi",
             "expected_album": "Coke Studio Season 9",
             "expected_quality_verdict": "authentic",
-            "expected_genre": "Sufi Qawwali"
+            "expected_genre": "Sufi Qawwali",
+            "expected_codec": "flac",
+            "expected_source_dir": "yubal",
+            "expected_mb_status": "unknown",
+            "expected_is_primary": true
         }
     },
     {
@@ -25,7 +33,11 @@
             "expected_title": "Hasrat",
             "expected_artist": "aleemrk",
             "expected_quality_verdict": "lossy",
-            "expected_genre": "Urdu Hip Hop"
+            "expected_genre": "Urdu Hip Hop",
+            "expected_codec": "opus",
+            "expected_source_dir": "yubal",
+            "expected_mb_status": "unknown",
+            "expected_is_primary": true
         }
     },
     {
@@ -34,7 +46,11 @@
             "expected_title": "Tum Aik Gorakh Dhanda Ho",
             "expected_album": "Nescafe Basement",
             "expected_quality_verdict": "lossy",
-            "expected_genre": "Sufi Qawwali"
+            "expected_genre": "Sufi Qawwali",
+            "expected_codec": "opus",
+            "expected_source_dir": "yubal",
+            "expected_mb_status": "unknown",
+            "expected_is_primary": true
         }
     }
 ]

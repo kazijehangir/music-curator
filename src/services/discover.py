@@ -67,6 +67,20 @@ def extract_metadata(filepath: Path) -> Dict[str, Any]:
                 elif file_type == 'MP4':
                     meta['codec'] = 'aac'
 
+                # Fallback to extension if type detection failed
+                if not meta['codec']:
+                    ext = filepath.suffix.lower()
+                    ext_map = {
+                        '.flac': 'flac',
+                        '.opus': 'opus',
+                        '.mp3': 'mp3',
+                        '.m4a': 'aac',
+                        '.aac': 'aac',
+                        '.ogg': 'ogg',
+                        '.wav': 'wav'
+                    }
+                    meta['codec'] = ext_map.get(ext)
+
             if hasattr(f, 'tags') and f.tags:
                 def _get_tag(*keys) -> str:
                     """Try each key in order; return the first non-empty string found."""

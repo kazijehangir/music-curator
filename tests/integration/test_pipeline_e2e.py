@@ -209,32 +209,35 @@ def test_full_pipeline_e2e(test_env, test_case):
     # ── 4. Verify final PocketBase state ──────────────────────────────────────
     logger.info("Verifying final PocketBase state")
 
+    # Helper to clean/map expectation keys
+    def get_expected(field_name: str) -> any:
+        return expected.get(f"expected_{field_name}")
+
+    # Helper to get all field names from a schema class
+    def get_schema_fields(cls):
+        return [v for k, v in cls.__dict__.items() if not k.startswith("_") and isinstance(v, str)]
+
+    # Verify music_file record
     files = pb.collection(COLL_FILE).get_full_list()
     assert len(files) == 1, f"Expected 1 file record, got {len(files)}"
     file_record = files[0]
 
-    assert getattr(file_record, MusicFile.QUALITY_VERDICT, None), \
-        "Analyze failed to set a quality verdict on the file record"
-    if "expected_quality_verdict" in expected:
-        v = getattr(file_record, MusicFile.QUALITY_VERDICT)
-        assert v == expected["expected_quality_verdict"], \
-            f"Expected quality verdict '{expected['expected_quality_verdict']}', got '{v}'"
+    for field in get_schema_fields(MusicFile):
+        exp_val = get_expected(field)
+        if exp_val is not None:
+            actual_val = getattr(file_record, field, None)
+            assert actual_val == exp_val, f"File field '{field}' mismatch: expected '{exp_val}', got '{actual_val}'"
 
+    # Verify music_release record
     releases = pb.collection(COLL_RELEASE).get_full_list()
     assert len(releases) == 1, f"Expected 1 release record, got {len(releases)}"
-    rel = releases[0]
+    release_record = releases[0]
 
-    if "expected_title" in expected:
-        assert getattr(rel, Release.TITLE) == expected["expected_title"]
-    if "expected_artist" in expected:
-        assert getattr(rel, Release.ARTIST) == expected["expected_artist"]
-    if "expected_album" in expected:
-        assert getattr(rel, Release.ALBUM) == expected["expected_album"]
-    if "expected_genre" in expected:
-        actual_genre = getattr(rel, Release.GENRE)
-        # Genre only asserted when it was actually written (LLM or sidecar)
-        if actual_genre:
-            assert actual_genre == expected["expected_genre"]
+    for field in get_schema_fields(Release):
+        exp_val = get_expected(field)
+        if exp_val is not None:
+            actual_val = getattr(release_record, field, None)
+            assert actual_val == exp_val, f"Release field '{field}' mismatch: expected '{exp_val}', got '{actual_val}'"
 
     # Provenance: at least one metadata source record must exist after tagging
     sources = pb.collection(COLL_METADATA_SOURCE).get_full_list()

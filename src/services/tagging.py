@@ -1,5 +1,6 @@
 import logging
 import json
+import re
 import httpx
 import sys
 from pathlib import Path
@@ -19,6 +20,25 @@ CONF_MB = 95
 CONF_FILE_TAGS = 80
 CONF_LLM = 70
 CONF_SIDECAR = 60
+CONF_ADHOC = 40
+
+# Source-directory to confidence mapping for raw file tags
+_SOURCE_DIR_CONFIDENCE = {
+    "tidal-dl": CONF_FILE_TAGS,  # 80 — commercial tags, usually correct
+    "yubal":    CONF_SIDECAR,    # 60 — yt-dlp titles are good, albums/genre weak
+    "adhoc":    CONF_ADHOC,      # 40 — unknown provenance
+}
+
+# Patterns to strip from filenames / titles before sending to the LLM.
+_JUNK_PATTERN = re.compile(
+    r'\s*[\(\[]'
+    r'(?:official\s+(?:audio|video|music\s+video|lyric\s+video|hd)|'
+    r'lyrics?|full\s+(?:song|audio|video)|hd|4k|128\s*kbps|320\s*kbps|'
+    r'remaster(?:ed)?|explicit|clean\s+version|radio\s+edit)'
+    r'[\)\]]'
+    r'|\s+-\s+(?:official\s+(?:audio|video|music\s+video|lyric\s+video))',
+    re.IGNORECASE,
+)
 
 def run_tagging(pb: Optional[Any] = None) -> Dict[str, Any]:
     """
@@ -63,10 +83,15 @@ def process_release(pb, release, stats: Dict[str, Any]) -> bool:
     )
     if not files:
         return False
-        
+
     # Find the primary file, or default to the first
     primary_file = next((f for f in files if getattr(f, MusicFile.IS_PRIMARY, False)), files[0])
-    
+
+    # Pass 0: Seed raw file tags as provenance-tracked metadata_source records.
+    # This runs first so every subsequent pass can compete on confidence rather
+    # than the file-tag data silently losing because it was never registered.
+    _pass_0_file_tags(pb, release.id, files)
+
     # Pass 1: Beets (MB)
     mb_id = _pass_1_beets(primary_file)
     if mb_id:
@@ -99,6 +124,54 @@ def process_release(pb, release, stats: Dict[str, Any]) -> bool:
     pb.collection(COLL_RELEASE).update(release.id, {Release.NEEDS_REVIEW: False})
     
     return True
+
+def _pass_0_file_tags(pb, release_id: str, files: List[Any]):
+    """
+    Seed raw file tags (extracted by discover) into music_metadata_source.
+
+    discover.py stores title/artist/album as a pipe-separated combo in
+    raw_title__raw_artist__raw_album. Without this pass those values are
+    invisible to the confidence-based resolution system, so an LLM error
+    could silently override a correct file tag with no way to win back.
+
+    Confidence is assigned by source directory:
+      tidal-dl → 80 (commercial tags, usually correct)
+      yubal    → 60 (yt-dlp, good titles, weak genre/album)
+      adhoc    → 40 (unknown provenance)
+    """
+    for file_record in files:
+        raw_combo = getattr(file_record, MusicFile.RAW_META, None)
+        if not raw_combo or not raw_combo.replace('|', '').strip():
+            continue  # No embedded tags — nothing to seed
+
+        parts = [p.strip() for p in raw_combo.split(' | ')]
+        raw_title  = parts[0] if len(parts) > 0 else ""
+        raw_artist = parts[1] if len(parts) > 1 else ""
+        raw_album  = parts[2] if len(parts) > 2 else ""
+
+        if not (raw_title or raw_artist or raw_album):
+            continue
+
+        source_dir = getattr(file_record, MusicFile.SOURCE_DIR, "adhoc") or "adhoc"
+        confidence = _SOURCE_DIR_CONFIDENCE.get(source_dir, CONF_ADHOC)
+
+        for field, value in [
+            (Release.TITLE,  raw_title),
+            (Release.ARTIST, raw_artist),
+            (Release.ALBUM,  raw_album),
+        ]:
+            if value:
+                try:
+                    pb.collection(COLL_METADATA_SOURCE).create({
+                        MetadataSource.FILE:       file_record.id,
+                        MetadataSource.SOURCE:     "file_tags",
+                        MetadataSource.FIELD_NAME: field,
+                        MetadataSource.VALUE:      value,
+                        MetadataSource.CONFIDENCE: confidence,
+                    })
+                except Exception as e:
+                    logger.warning(f"Pass 0: could not seed {field} for file {file_record.id}: {e}")
+
 
 def _pass_1_beets(primary_file) -> Optional[str]:
     file_path = getattr(primary_file, MusicFile.FILE_PATH, None)
@@ -169,17 +242,32 @@ def _pass_2_sidecars(pb, release_id: str, files: List[Any]):
                 logger.error(f"Failed to read info.json for {file_path}: {e}")
 
 def _pass_3_llm(pb, release_id: str, primary_file, stats: Dict[str, Any]):
-    # Find the best metadata we have gathered so far (e.g., from sidecars)
+    """
+    Pass 3: LLM normalization via Ollama/LM Studio.
+
+    Builds the richest possible structured input for the LLM by:
+      1. Using the highest-confidence value per field gathered so far
+         (from Pass 0 file tags and Pass 2 sidecars).
+      2. Falling back to the release record's title/artist/album when
+         no metadata_source entries exist yet.
+      3. When the fallback title looks like a yt-dlp filename stem
+         (e.g. "Tum Aik Gorakh Dhanda Ho - Nescafe Basement") and the
+         artist is unknown, splitting the title on " - " to surface the
+         show/album name as a separate field — giving the LLM the context
+         it needs for genre inference.
+    """
+    # Collect the best value per field from existing metadata_source records.
+    debug_id = f"{primary_file.id}"
     try:
         sources = pb.collection(COLL_METADATA_SOURCE).get_full_list(
             query_params={"filter": f"{MetadataSource.FILE}='{primary_file.id}'"}
         )
-        best_tags = {}
-        highest_conf = {}
+        best_tags: Dict[str, Any] = {}
+        highest_conf: Dict[str, int] = {}
         for s in sources:
             field = getattr(s, MetadataSource.FIELD_NAME, None)
-            conf = getattr(s, MetadataSource.CONFIDENCE, 0)
-            val = getattr(s, MetadataSource.VALUE, None)
+            conf  = getattr(s, MetadataSource.CONFIDENCE, 0)
+            val   = getattr(s, MetadataSource.VALUE, None)
             if field and val:
                 if field not in highest_conf or conf > highest_conf[field]:
                     highest_conf[field] = conf
@@ -188,78 +276,127 @@ def _pass_3_llm(pb, release_id: str, primary_file, stats: Dict[str, Any]):
         logger.error(f"Error fetching existing metadata for LLM pass: {e}")
         best_tags = {}
 
-    current_title = best_tags.get(Release.TITLE, "")
+    current_title  = best_tags.get(Release.TITLE,  "")
     current_artist = best_tags.get(Release.ARTIST, "")
-    current_album = best_tags.get(Release.ALBUM, "")
+    current_album  = best_tags.get(Release.ALBUM,  "")
 
-    input_text = ""
+    llm_input_label = ""  # Used in exception message to avoid NameError
+
     if current_title or current_artist or current_album:
+        # At least one field is known — use structured input directly.
+        llm_input_label = f"{current_title} / {current_artist}"
         input_text = f"Title: {current_title} | Artist: {current_artist} | Album: {current_album}"
         print(f"DEBUG: Using gathered metadata for LLM: '{input_text}'")
     else:
-        # Get raw metadata (e.g. filename or raw mutagen tags)
+        # No metadata_source entries yet — fall back to the release record.
         raw_meta = getattr(primary_file, MusicFile.RAW_META, None)
-        print(f"DEBUG: Raw meta for {primary_file.id}: '{raw_meta}'")
-        
-        # If raw_meta is missing or empty, fallback to the current release title 
-        # (which often holds the filename stem if untagged).
+        print(f"DEBUG: Raw meta for {debug_id}: '{raw_meta}'")
+
         if not raw_meta or not raw_meta.replace('|', '').strip():
             try:
                 rel = pb.collection(COLL_RELEASE).get_one(release_id)
-                raw_meta = f"{getattr(rel, Release.TITLE, '')} | {getattr(rel, Release.ARTIST, '')} | {getattr(rel, Release.ALBUM, '')}"
+                raw_meta = (
+                    f"{getattr(rel, Release.TITLE, '')} | "
+                    f"{getattr(rel, Release.ARTIST, '')} | "
+                    f"{getattr(rel, Release.ALBUM, '')}"
+                )
                 print(f"DEBUG: Using fallback raw_meta from release: '{raw_meta}'")
             except Exception as e:
                 print(f"DEBUG: Fallback failed: {e}")
                 return
-                
+
         if not raw_meta.replace('|', '').strip():
             print("DEBUG: Even fallback meta is empty, skipping LLM")
             return
-        input_text = raw_meta
-        
+
+        # Parse the pipe-separated combo into components.
+        parts          = [p.strip() for p in raw_meta.split(' | ')]
+        parsed_title   = parts[0] if len(parts) > 0 else ""
+        parsed_artist  = parts[1] if len(parts) > 1 else ""
+        parsed_album   = parts[2] if len(parts) > 2 else ""
+
+        # When artist is unknown and the title looks like a yt-dlp filename
+        # stem (e.g. "Tum Aik Gorakh Dhanda Ho - Nescafe Basement"), split on
+        # the LAST " - " to separate title from show/album.  This surfaces
+        # "Nescafe Basement" as a distinct field, which the LLM can use to
+        # infer genre (Sufi/folk showcase) instead of guessing blindly.
+        artist_is_unknown = not parsed_artist or parsed_artist in ("Unknown Artist", "Unknown", "")
+        if artist_is_unknown and " - " in parsed_title and not parsed_album:
+            title_parts   = [p.strip() for p in parsed_title.rsplit(" - ", 1)]
+            clean_title   = _JUNK_PATTERN.sub("", title_parts[0]).strip()
+            clean_show    = _JUNK_PATTERN.sub("", title_parts[-1]).strip()
+            parsed_title  = clean_title or parsed_title
+            parsed_album  = clean_show
+            print(f"DEBUG: Split filename title → title='{parsed_title}', show/album='{parsed_album}'")
+
+        llm_input_label = f"{parsed_title} / {parsed_artist}"
+        input_text = (
+            f"Title: {parsed_title} | "
+            f"Artist: {parsed_artist or 'Unknown'} | "
+            f"Album/Show: {parsed_album}"
+        )
+
     prompt = (
-        f"Analyze the following raw music track metadata: '{input_text}'. "
+        f"Analyze the following raw music track metadata: '{input_text}'.\n\n"
         "Return a JSON object with 'title', 'artist', 'album', 'genre', and 'language'.\n"
         "RULES:\n"
-        "1. Context: This is primarily a Pakistani/South Asian music library. Use your knowledge to infer the artist and correct genre.\n"
-        "2. Genre: INFER the genre based on the artist/title. Examples: 'Sufi Qawwali' (e.g. Abida Parveen, Ali Sethi, Nusrat Fateh Ali Khan), 'Urdu Hip Hop' (e.g. aleemrk, Talha Anjum), 'Pop', 'Ghazal', 'Rock'. DO NOT output generic terms like 'Unknown' or 'Music'.\n"
-        "3. Language: Infer the language (e.g. 'Urdu', 'Punjabi', 'Hindi').\n"
-        "4. Title Case: Apply proper title case (e.g. 'HASRAT' -> 'Hasrat').\n"
-        "5. Cleanup: Transliterate to Latin script. Remove meaningless garbage like '(Official Audio)', '[128kbps]', or 'Music Video'."
+        "1. Context: This is a Pakistani/South Asian music library. "
+        "Use ALL available context — title, artist, AND album/show — to infer the correct genre.\n"
+        "2. Genre Classification:\n"
+        "   - 'Sufi Qawwali': Abida Parveen, Nusrat Fateh Ali Khan, Rahat Fateh Ali Khan, "
+        "Ali Sethi, Tina Sani. Key indicators: Mentions of 'Coke Studio' or 'Nescafe Basement' "
+        "combined with traditional/devotional singers. Songs like 'Aaqa', 'Hasrat' (if spiritual), "
+        "'Tum Aik Gorakh Dhanda Ho'.\n"
+        "   - 'Ghazal': Mehdi Hassan, Ghulam Ali, Jagjit Singh, Farida Khanum.\n"
+        "   - 'Urdu Hip Hop': aleemrk, Talha Anjum, Talha Yunus, Young Stunners, Maanu, Faris Shafi.\n"
+        "   - 'Pakistani Pop': Atif Aslam, Hadiqa Kiyani, Ali Zafar, Strings, Vital Signs.\n"
+        "   - 'Folk': Reshma, Arif Lohar, Zarsanga.\n"
+        "   DO NOT output generic terms like 'Unknown', 'Music', or 'World Music'.\n"
+        "3. Language: Infer the primary language (e.g. 'Urdu', 'Punjabi', 'Hindi', 'English', 'Sindhi', 'Persian').\n"
+        "4. Title Case: Apply proper title case (e.g. 'HASRAT' → 'Hasrat').\n"
+        "5. Cleanup: Transliterate non-Latin script to Latin. "
+        "Remove garbage suffixes like '(Official Audio)', '[128kbps]', 'Music Video', 'Lyrics', "
+        "'(Official Music Video)', 'ft.', 'feat.' from title ONLY. Keep artist collaborators in the artist field.\n"
+        "6. Album/Show: If the input specifies a show like 'Coke Studio Season 9' or 'Nescafe Basement', "
+        "preserve it EXACTLY as the 'album'. Do not truncate it to just the show name if a season is provided."
     )
-    
+
     payload = {
-        "model": "openai/gpt-oss-20b", # Requires checking user's exact model
+        "model": settings.llm_model_name,
         "messages": [
-            {"role": "system", "content": "You are a music metadata parsing assistant. Return a JSON object containing keys: 'title', 'artist', 'album', 'genre', 'language'."},
-            {"role": "user", "content": prompt}
+            {
+                "role": "system",
+                "content": (
+                    "You are a music metadata parsing assistant specializing in Pakistani and "
+                    "South Asian music. Return ONLY a valid JSON object with keys: "
+                    "'title', 'artist', 'album', 'genre', 'language'. No markdown, no explanation."
+                ),
+            },
+            {"role": "user", "content": prompt},
         ],
-        "temperature": 0.0
+        "temperature": 0.0,
     }
-    
+
     try:
-        # Robustly ensure /v1 suffix if missing in settings
         base_url = settings.lm_studio_url.rstrip('/')
         if not base_url.endswith('/v1'):
             base_url += '/v1'
-            
+
         response = httpx.post(
             f"{base_url}/chat/completions",
             json=payload,
-            timeout=45.0
+            timeout=45.0,
         )
         response.raise_for_status()
         result = response.json()
-        
-        # Parse output with robust error handling
+
         if 'choices' not in result or not result['choices']:
             logger.error(f"LLM response missing 'choices': {result}")
             return
 
-        content = result['choices'][0]['message']['content']
-        content = content.strip()
-        
-        # Strip markdown code blocks if present
+        content = result['choices'][0]['message']['content'].strip()
+
+        # Strip markdown code fences if the model wraps its output.
         if content.startswith("```json"):
             content = content[len("```json"):]
         elif content.startswith("```"):
@@ -267,35 +404,36 @@ def _pass_3_llm(pb, release_id: str, primary_file, stats: Dict[str, Any]):
         if content.endswith("```"):
             content = content[:-3]
         content = content.strip()
-        
+
         try:
             parsed = LLMMetadataResponse.model_validate_json(content)
         except Exception as ve:
-            logger.error(f"Failed to validate LLM JSON for {release_id}: {ve}\nContent: {content}")
+            logger.error(
+                f"Failed to validate LLM JSON for {release_id}: {ve}\nContent: {content}"
+            )
             return
-        
-        # Save results to PocketBase
+
         fields_to_save = {
-            Release.TITLE: parsed.title,
-            Release.ARTIST: parsed.artist,
-            Release.ALBUM: parsed.album,
-            Release.GENRE: parsed.genre,
-            Release.LANGUAGE: parsed.language
+            Release.TITLE:    parsed.title,
+            Release.ARTIST:   parsed.artist,
+            Release.ALBUM:    parsed.album,
+            Release.GENRE:    parsed.genre,
+            Release.LANGUAGE: parsed.language,
         }
-        
+
         for field, value in fields_to_save.items():
             if value:
                 pb.collection(COLL_METADATA_SOURCE).create({
-                    MetadataSource.FILE: primary_file.id,
-                    MetadataSource.SOURCE: "llm",
+                    MetadataSource.FILE:       primary_file.id,
+                    MetadataSource.SOURCE:     "llm",
                     MetadataSource.FIELD_NAME: field,
-                    MetadataSource.VALUE: value,
-                    MetadataSource.CONFIDENCE: CONF_LLM
+                    MetadataSource.VALUE:      value,
+                    MetadataSource.CONFIDENCE: CONF_LLM,
                 })
         stats["llm_processed"] += 1
-                
+
     except Exception as e:
-        msg = f"LLM normalization failed for {raw_meta}: {e}"
+        msg = f"LLM normalization failed for '{llm_input_label}': {e}"
         logger.error(msg)
         stats.setdefault("errors", []).append(msg)
 

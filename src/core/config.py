@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     
     # External APIs
     lm_studio_url: str = "http://10.0.7.1:1234/v1"
+    llm_model_name: str = "openai/gpt-oss-20b"
     
     # Internal Paths
     nas_mount_path: str
