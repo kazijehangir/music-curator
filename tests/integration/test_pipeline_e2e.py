@@ -78,52 +78,54 @@ def test_schema_fields_complete(pocketbase_server):
     rf = fields(release_col)
     sf = fields(source_col)
 
+    # Helper to get all fields from a schema class
+    def get_fields(cls):
+        return [v for k, v in cls.__dict__.items() if not k.startswith("_") and isinstance(v, str)]
+
     # ── music_file ────────────────────────────────────────────────────────────
-    for name in ("file_path", "file_hash", "codec", "source_dir",
-                 "is_primary", "acoustid_fp", "quality_score", "spectral_ceiling"):
+    for name in get_fields(MusicFile):
         assert name in ff, f"music_file missing field '{name}'"
 
-    assert ff.get("quality_verdict", {}).get("type") == "select", \
-        "music_file.quality_verdict should be a select field"
-    assert "authentic" in ff.get("quality_verdict", {}).get("values", []), \
-        "music_file.quality_verdict missing 'authentic' value"
+    assert ff.get(MusicFile.QUALITY_VERDICT, {}).get("type") == "select", \
+        f"music_file.{MusicFile.QUALITY_VERDICT} should be a select field"
+    assert "authentic" in ff.get(MusicFile.QUALITY_VERDICT, {}).get("values", []), \
+        f"music_file.{MusicFile.QUALITY_VERDICT} missing 'authentic' value"
 
-    assert ff.get("release", {}).get("type") == "relation", \
-        "music_file.release should be a relation field"
-    assert ff.get("release", {}).get("collectionId") == release_id, \
-        f"music_file.release.collectionId should be '{release_id}' (music_release), " \
-        f"got '{ff.get('release', {}).get('collectionId')}'"
+    assert ff.get(MusicFile.RELEASE, {}).get("type") == "relation", \
+        f"music_file.{MusicFile.RELEASE} should be a relation field"
+    assert ff.get(MusicFile.RELEASE, {}).get("collectionId") == release_id, \
+        f"music_file.{MusicFile.RELEASE}.collectionId should be '{release_id}' (music_release), " \
+        f"got '{ff.get(MusicFile.RELEASE, {}).get('collectionId')}'"
 
     # ── music_release ─────────────────────────────────────────────────────────
-    for name in ("title", "artist", "album", "genre", "isrc",
-                 "file_count", "needs_review"):
+    for name in get_fields(Release):
         assert name in rf, f"music_release missing field '{name}'"
 
-    assert rf.get("mb_status", {}).get("type") == "select", \
-        "music_release.mb_status should be a select field"
-    assert "unknown" in rf.get("mb_status", {}).get("values", []), \
-        "music_release.mb_status missing 'unknown' value"
+    assert rf.get(Release.MB_STATUS, {}).get("type") == "select", \
+        f"music_release.{Release.MB_STATUS} should be a select field"
+    assert "unknown" in rf.get(Release.MB_STATUS, {}).get("values", []), \
+        f"music_release.{Release.MB_STATUS} missing 'unknown' value"
 
-    assert rf.get("best_file", {}).get("type") == "relation", \
-        "music_release.best_file should be a relation field"
-    assert rf.get("best_file", {}).get("collectionId") == file_id, \
-        f"music_release.best_file.collectionId should be '{file_id}' (music_file), " \
-        f"got '{rf.get('best_file', {}).get('collectionId')}'"
+    assert rf.get(Release.BEST_FILE, {}).get("type") == "relation", \
+        f"music_release.{Release.BEST_FILE} should be a relation field"
+    assert rf.get(Release.BEST_FILE, {}).get("collectionId") == file_id, \
+        f"music_release.{Release.BEST_FILE}.collectionId should be '{file_id}' (music_file), " \
+        f"got '{rf.get(Release.BEST_FILE, {}).get('collectionId')}'"
 
     # ── music_metadata_source ─────────────────────────────────────────────────
-    for name in ("field_name", "value", "confidence"):
+    for name in get_fields(MetadataSource):
         assert name in sf, f"music_metadata_source missing field '{name}'"
 
-    assert sf.get("source", {}).get("type") == "select", \
-        "music_metadata_source.source should be a select field"
-    assert "musicbrainz" in sf.get("source", {}).get("values", []), \
-        "music_metadata_source.source missing 'musicbrainz' value"
+    assert sf.get(MetadataSource.SOURCE, {}).get("type") == "select", \
+        f"music_metadata_source.{MetadataSource.SOURCE} should be a select field"
+    assert "musicbrainz" in sf.get(MetadataSource.SOURCE, {}).get("values", []), \
+        f"music_metadata_source.{MetadataSource.SOURCE} missing 'musicbrainz' value"
 
-    assert sf.get("file", {}).get("type") == "relation", \
-        "music_metadata_source.file should be a relation field"
-    assert sf.get("file", {}).get("collectionId") == file_id, \
-        f"music_metadata_source.file.collectionId should be '{file_id}' (music_file), " \
-        f"got '{sf.get('file', {}).get('collectionId')}'"
+    assert sf.get(MetadataSource.FILE, {}).get("type") == "relation", \
+        f"music_metadata_source.{MetadataSource.FILE} should be a relation field"
+    assert sf.get(MetadataSource.FILE, {}).get("collectionId") == file_id, \
+        f"music_metadata_source.{MetadataSource.FILE}.collectionId should be '{file_id}' (music_file), " \
+        f"got '{sf.get(MetadataSource.FILE, {}).get('collectionId')}'"
 
 
 def test_discover_filter_by_path(pocketbase_server):

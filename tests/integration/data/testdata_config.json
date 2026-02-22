@@ -13,7 +13,7 @@
         "test_file": "1. Abida Parveen, Ali Sethi - Aaqa - Coke Studio Season 9.flac",
         "expectations": {
             "expected_title": "Aaqa",
-            "expected_artist": "Abida Parveen & Ali Sethi",
+            "expected_artist": "Abida Parveen, Ali Sethi",
             "expected_album": "Coke Studio Season 9",
             "expected_quality_verdict": "authentic",
             "expected_genre": "Sufi Qawwali"
