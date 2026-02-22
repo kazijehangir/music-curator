@@ -209,9 +209,9 @@ def test_quality_score_fake_flac():
 
 
 def test_quality_score_suspicious_flac():
-    """FLAC with ceiling between 16.5–19 kHz gets 'suspicious' and loses points."""
+    """FLAC with ceiling between 15.5-16.5 kHz gets 'suspicious' and loses points."""
     score, verdict = calculate_quality_score(
-        codec="flac", bitrate=1411000, bit_depth=16, spectral_ceiling=17500.0
+        codec="flac", bitrate=1411000, bit_depth=16, spectral_ceiling=16000.0
     )
     assert verdict == "suspicious"
 
