@@ -6,6 +6,7 @@ import mutagen
 from pocketbase import PocketBase
 
 from src.core.config import settings
+from src.core.schema import MusicFile
 
 # Seconds to allow for mutagen metadata extraction per file before giving up.
 # Applies as a safety net — stat_fingerprint itself is near-instant.
@@ -197,6 +198,28 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
             continue
             
         print(f"STATUS: Scanning folder: {dir_name}")
+
+        # Prefetch existing files to avoid N+1 queries
+        try:
+            # Only fetch fields needed for change detection: id, file_path, file_hash
+            safe_dir_name = dir_name.replace("'", "\\'")
+            existing_records = pb.collection('music_file').get_full_list(
+                query_params={
+                    "filter": f"{MusicFile.SOURCE_DIR}='{safe_dir_name}'",
+                    "fields": "id,file_path,file_hash"
+                }
+            )
+        except Exception as e:
+            print(f"WARNING: Failed to prefetch records for {dir_name}: {e}")
+            existing_records = []
+
+        # Create lookup map for O(1) access
+        existing_lookup = {
+            getattr(r, MusicFile.FILE_PATH): r
+            for r in existing_records
+            if getattr(r, MusicFile.FILE_PATH, None)
+        }
+
         for root, _, files in os.walk(ingest_path):
             for file in files:
                 filepath = Path(root) / file
@@ -207,17 +230,13 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
                 try:
                     # stat_fingerprint uses os.stat() only — zero file reads, no CIFS blocking.
                     file_fingerprint = stat_fingerprint(filepath)
-
-                    # Check if file exists in PocketBase
                     file_path_str = str(filepath)
-                    safe_path_str = file_path_str.replace("'", "\\'")
-                    records = pb.collection('music_file').get_list(
-                        1, 1, {"filter": f"file_path='{safe_path_str}'"}
-                    )
 
-                    if records.items:
+                    # Check if file exists in PocketBase using local lookup
+                    existing_record = existing_lookup.get(file_path_str)
+
+                    if existing_record:
                         # File exists — check if size/mtime changed
-                        existing_record = records.items[0]
                         existing_fp = getattr(existing_record, 'file_hash', None)
                         if existing_fp != file_fingerprint:
                             pb.collection('music_file').update(existing_record.id, {
