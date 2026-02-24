@@ -105,6 +105,18 @@ scripts/          # Setup and deployment scripts
 - `POST /api/release/{id}/reanalyze`: Manual trigger for updates.
 - `GET /api/health`: Validates the health of the system pipeline.
 
+## Environment Variables
+
+### n8n Configuration
+The n8n workflow requires the following environment variable to be set:
+- `MUSIC_CURATOR_API_URL`: The base URL of the Python compute service (e.g., `http://your-server-ip:8000`).
+
+### Python Service Configuration
+The Python service uses Pydantic Settings and can be configured via a `.env` file or environment variables:
+- `LM_STUDIO_URL`: (Optional) URL for the LLM metadata normalization service.
+- `POCKETBASE_URL`: (Optional) URL for the PocketBase instance.
+- See `src/core/config.py` for other available settings.
+
 ## Observability & Debugging
 
 The system uses a **Dual-Layer Observability** model to balance clean orchestration with deep technical visibility:

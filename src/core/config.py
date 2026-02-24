@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     pocketbase_admin_password: str
     
     # External APIs
-    lm_studio_url: str = "http://10.0.7.1:1234/v1"
+    lm_studio_url: str = "http://localhost:1234/v1" # Overridden by LM_STUDIO_URL env var
     llm_model_name: str = "openai/gpt-oss-20b"
     
     # Internal Paths
