@@ -75,3 +75,42 @@ async def test_task_manager_cancellation():
             
         mock_killpg.assert_any_call(1010, signal.SIGTERM)
         mock_killpg.assert_any_call(1010, signal.SIGKILL)
+
+@pytest.mark.asyncio
+async def test_task_manager_error_handling():
+    manager = TaskManager()
+    endpoint = "/api/test"
+
+    # Mock create_subprocess_exec to raise an exception
+    with patch("asyncio.create_subprocess_exec", side_effect=Exception("Launch Failure")), \
+         patch("src.services.task_manager.task_logger") as mock_task_logger:
+
+        results = []
+        async for line in manager.run_task("test", endpoint):
+            results.append(line)
+
+        assert len(results) == 1
+        assert "ERROR: Internal Error in TaskManager for /api/test: Launch Failure" in results[0]
+        mock_task_logger.error.assert_called_once_with("Internal Error in TaskManager for /api/test: Launch Failure")
+
+@pytest.mark.asyncio
+async def test_task_manager_readline_error_handling():
+    mock_proc = AsyncMock()
+    mock_proc.pid = 888
+    mock_proc.stdout.readline.side_effect = Exception("Readline Error")
+
+    manager = TaskManager()
+    endpoint = "/api/test-readline"
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+         patch("os.getpgid", return_value=888), \
+         patch("src.services.task_manager.task_logger") as mock_task_logger:
+
+        results = []
+        async for line in manager.run_task("test", endpoint):
+            results.append(line)
+
+        # Results should contain start msg and then the error
+        assert any("Task started" in l for l in results)
+        assert any("ERROR: Internal Error in TaskManager for /api/test-readline: Readline Error" in l for l in results)
+        mock_task_logger.error.assert_called_once_with("Internal Error in TaskManager for /api/test-readline: Readline Error")
