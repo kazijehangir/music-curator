@@ -210,7 +210,8 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
 
                     # Check if file exists in PocketBase
                     file_path_str = str(filepath)
-                    safe_path_str = file_path_str.replace("'", "\\'")
+                    # Escape backslashes first, then single quotes to prevent filter injection
+                    safe_path_str = file_path_str.replace("\\", "\\\\").replace("'", "\\'")
                     records = pb.collection('music_file').get_list(
                         1, 1, {"filter": f"file_path='{safe_path_str}'"}
                     )
