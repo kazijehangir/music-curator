@@ -139,5 +139,11 @@ Tasks run in isolated process groups (`start_new_session=True`). The service det
 We use systemd to run this automatically. To deploy standard changes, use:
 `./scripts/deploy_service.sh`
 
+## Security
+
+This project implements security best practices including:
+- **Input Sanitization**: File paths and other user-controlled inputs are sanitized before being used in database queries to prevent injection attacks.
+- **Least Privilege**: Services run with minimal required permissions.
+
 ## Important Contribution Guidelines
 If you are an AI assistant or human modifying this project, you **MUST** review the rules outlined in `AGENT_RULES.md`.
