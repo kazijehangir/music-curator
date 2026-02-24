@@ -24,7 +24,7 @@
         {
             "parameters": {
                 "method": "POST",
-                "url": "http://10.0.1.113:8000/api/discover",
+                "url": "={{ $env.MUSIC_CURATOR_API_URL }}/api/discover",
                 "options": {
                     "timeout": 300000
                 }
@@ -41,7 +41,7 @@
         {
             "parameters": {
                 "method": "POST",
-                "url": "http://10.0.1.113:8000/api/analyze",
+                "url": "={{ $env.MUSIC_CURATOR_API_URL }}/api/analyze",
                 "options": {
                     "timeout": 600000
                 }
@@ -89,7 +89,7 @@
         {
             "parameters": {
                 "method": "POST",
-                "url": "http://10.0.1.113:8000/api/tag",
+                "url": "={{ $env.MUSIC_CURATOR_API_URL }}/api/tag",
                 "options": {
                     "timeout": 300000
                 }
@@ -106,7 +106,7 @@
         {
             "parameters": {
                 "method": "POST",
-                "url": "http://10.0.1.113:8000/api/symlink",
+                "url": "={{ $env.MUSIC_CURATOR_API_URL }}/api/symlink",
                 "options": {
                     "timeout": 120000
                 }

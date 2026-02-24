@@ -14,3 +14,4 @@ tests/integration/data/*.wav
 
 # Allow test configuration
 !tests/integration/data/testdata_config.json
+.venv/
