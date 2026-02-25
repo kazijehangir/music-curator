@@ -379,3 +379,23 @@ def test_repair_empty_database(mocker):
     assert result["repaired"] == 0
     assert result["errors"] == []
     mock_pb.collection.return_value.update.assert_not_called()
+
+def test_run_discovery_prefetch_failure(tmp_path, mocker):
+    """If pre-fetching fails, the function should return an error."""
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+
+    # Simulate pre-fetch error
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("API Error")
+
+    result = run_discovery()
+
+    assert result["status"] == "error"
+    assert len(result["errors"]) > 0
+    assert "Failed to pre-fetch existing files" in result["errors"][0]
+
+    # Verify no file scanning happened (optimization failed early)
+    mock_pb_client.collection.return_value.create.assert_not_called()
+    mock_pb_client.collection.return_value.update.assert_not_called()
