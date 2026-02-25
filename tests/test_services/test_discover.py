@@ -34,6 +34,7 @@ def test_run_discovery_skip_invalid_exts(tmp_path, mocker):
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
     
     # Mock records.items to be empty to simulate new file
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
     mock_records = mocker.MagicMock()
     mock_records.items = []
     mock_pb_client.collection.return_value.get_list.return_value = mock_records
@@ -66,6 +67,9 @@ def test_run_discovery_update_file(tmp_path, mocker):
     
     # Mock existing record with a DIFFERENT hash
     existing_record = mocker.MagicMock(file_hash="old_hash", id="rec_123")
+    existing_record.file_path = str(yubal_dir.joinpath("existing_song.flac"))
+    mock_pb_client.collection.return_value.get_full_list.return_value = [existing_record]
+
     mock_records = mocker.MagicMock()
     mock_records.items = [existing_record]
     mock_pb_client.collection.return_value.get_list.return_value = mock_records
@@ -81,6 +85,33 @@ def test_run_discovery_update_file(tmp_path, mocker):
         'file_hash': '12345:67890',
         'quality_score': None
     })
+
+def test_run_discovery_performance_optimization(tmp_path, mocker):
+    """Verify that we pre-fetch files and don't call get_list for each file."""
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    music_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    music_dir.mkdir(parents=True)
+    # Create 5 files
+    for i in range(5):
+        music_dir.joinpath(f"song_{i}.flac").touch()
+
+    mocker.patch("src.services.discover.stat_fingerprint", return_value="hash")
+    mocker.patch("src.services.discover.extract_metadata", return_value={"codec": "flac"})
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+
+    # Mock pre-fetch to return nothing
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
+
+    run_discovery()
+
+    # Verify get_full_list called once
+    assert mock_pb_client.collection.return_value.get_full_list.call_count == 1
+
+    # Verify get_list NOT called
+    assert mock_pb_client.collection.return_value.get_list.call_count == 0
 
 
 def test_run_discovery_metadata_timeout_skips_file(tmp_path, mocker):
@@ -101,6 +132,7 @@ def test_run_discovery_metadata_timeout_skips_file(tmp_path, mocker):
 
     mock_pb_client = mocker.MagicMock()
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
     mock_records = mocker.MagicMock()
     mock_records.items = []
     mock_pb_client.collection.return_value.get_list.return_value = mock_records
@@ -347,3 +379,23 @@ def test_repair_empty_database(mocker):
     assert result["repaired"] == 0
     assert result["errors"] == []
     mock_pb.collection.return_value.update.assert_not_called()
+
+def test_run_discovery_prefetch_failure(tmp_path, mocker):
+    """If pre-fetching fails, the function should return an error."""
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+
+    # Simulate pre-fetch error
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("API Error")
+
+    result = run_discovery()
+
+    assert result["status"] == "error"
+    assert len(result["errors"]) > 0
+    assert "Failed to pre-fetch existing files" in result["errors"][0]
+
+    # Verify no file scanning happened (optimization failed early)
+    mock_pb_client.collection.return_value.create.assert_not_called()
+    mock_pb_client.collection.return_value.update.assert_not_called()
