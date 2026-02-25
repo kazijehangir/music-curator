@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
 
 from src.core.schema import COLL_RELEASE, COLL_FILE, Release, MusicFile
+from src.core.security import sanitize_pb_filter
 
 logger = logging.getLogger(__name__)
 
@@ -333,8 +334,11 @@ def run_analysis(pb: Optional[Any] = None) -> Dict[str, Any]:
                 continue # Cannot deduplicate without footprint
                 
             # 3. Deduplication Logic
+            # Sanitize values even though they should be safe (IDs, hex hashes)
+            safe_fp = sanitize_pb_filter(fp)
+            safe_id = sanitize_pb_filter(record.id)
             duplicate_files = pb.collection(COLL_FILE).get_list(
-                1, 2, {"filter": f"{MusicFile.ACOUSTID_FP}='{fp}' && id!='{record.id}'"}
+                1, 2, {"filter": f"{MusicFile.ACOUSTID_FP}='{safe_fp}' && id!='{safe_id}'"}
             )
 
             # Preserve existing release assignment — re-analyzing a file (e.g.
@@ -376,8 +380,9 @@ def run_analysis(pb: Optional[Any] = None) -> Dict[str, Any]:
             
             # 4. Primary Election (Ranking)
             # Fetch all files tied to this release, sort by quality score descending
+            safe_release_id = sanitize_pb_filter(target_release_id)
             siblings = pb.collection(COLL_FILE).get_full_list(
-                query_params={"filter": f"{MusicFile.RELEASE}='{target_release_id}'", "sort": f"-{MusicFile.QUALITY_SCORE}"}
+                query_params={"filter": f"{MusicFile.RELEASE}='{safe_release_id}'", "sort": f"-{MusicFile.QUALITY_SCORE}"}
             )
 
             if siblings:
