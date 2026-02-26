@@ -297,6 +297,9 @@ def run_analysis(pb: Optional[Any] = None) -> Dict[str, Any]:
     total = len(unanalyzed_records)
     print(f"STATUS: Found {total} files needing analysis.")
 
+    # Optimization: Defer primary election to end of batch to avoid N+1 queries.
+    affected_release_ids = set()
+
     for i, record in enumerate(unanalyzed_records):
         file_path_str = getattr(record, 'file_path', None)
         if not file_path_str:
@@ -374,15 +377,29 @@ def run_analysis(pb: Optional[Any] = None) -> Dict[str, Any]:
             # Tie this file to the release parent
             pb.collection(COLL_FILE).update(record.id, {MusicFile.RELEASE: target_release_id})
             
-            # 4. Primary Election (Ranking)
+            # Defer Primary Election
+            if target_release_id:
+                affected_release_ids.add(target_release_id)
+
+        except Exception as e:
+            logger.error(f"Error analyzing {file_path_str}: {e}")
+            stats["errors"].append(f"Error processing {file_path_str}: {e}")
+
+    # 4. Batch Primary Election (Ranking)
+    # Run once per affected release, instead of once per file.
+    if affected_release_ids:
+        print(f"STATUS: Running primary election for {len(affected_release_ids)} releases.")
+
+    for release_id in affected_release_ids:
+        try:
             # Fetch all files tied to this release, sort by quality score descending
             siblings = pb.collection(COLL_FILE).get_full_list(
-                query_params={"filter": f"{MusicFile.RELEASE}='{target_release_id}'", "sort": f"-{MusicFile.QUALITY_SCORE}"}
+                query_params={"filter": f"{MusicFile.RELEASE}='{release_id}'", "sort": f"-{MusicFile.QUALITY_SCORE}"}
             )
 
             if siblings:
                 best_file_id = siblings[0].id
-                pb.collection(COLL_RELEASE).update(target_release_id, {
+                pb.collection(COLL_RELEASE).update(release_id, {
                     Release.BEST_FILE: best_file_id,
                     Release.FILE_COUNT: len(siblings)
                 })
@@ -393,9 +410,8 @@ def run_analysis(pb: Optional[Any] = None) -> Dict[str, Any]:
                     curr_p = getattr(sib, 'is_primary', False)
                     if curr_p != is_p:
                         pb.collection('music_file').update(sib.id, {'is_primary': is_p})
-                        
         except Exception as e:
-            logger.error(f"Error analyzing {file_path_str}: {e}")
-            stats["errors"].append(f"Error processing {file_path_str}: {e}")
+            logger.error(f"Error in primary election for release {release_id}: {e}")
+            # Non-fatal error for the batch
 
     return stats

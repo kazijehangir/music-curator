@@ -345,6 +345,51 @@ def test_run_analysis_fingerprint_dedup(mocker, tmp_path):
     mock_pb.collection.return_value.create.assert_not_called()
 
 
+def test_run_analysis_primary_election_error(mocker, tmp_path):
+    """
+    Test that an exception during the primary election phase is caught and logged,
+    and doesn't crash the entire function.
+    """
+    audio_file = tmp_path / "track_fail.flac"
+    audio_file.write_bytes(b"\x00" * 1024)
+
+    record = MagicMock()
+    record.id = "file_fail"
+    record.file_path = str(audio_file)
+    record.codec = "flac"
+    record.bitrate = 1411000
+    record.bit_depth = 16
+    record.raw_title__raw_artist__raw_album = "Fail | Fail | Fail"
+    record.release = None
+
+    mock_pb = _make_pb_mock(mocker, unanalyzed_records=[record])
+
+    mocker.patch("src.services.analyze.generate_acoustid", return_value="fp_fail")
+    mocker.patch("src.services.analyze.get_spectral_ceiling", return_value=20500.0)
+
+    # Simulate get_full_list raising an exception during primary election
+    # First call: unanalyzed files (successful)
+    # Second call: siblings (fails)
+    mock_pb.collection.return_value.get_full_list.side_effect = [
+        [record],
+        Exception("DB Connection Lost"),
+    ]
+
+    new_release = MagicMock()
+    new_release.id = "rel_fail"
+    mock_pb.collection.return_value.create.return_value = new_release
+
+    # Mock logger to verify error is logged
+    mock_logger = mocker.patch("src.services.analyze.logger")
+
+    result = run_analysis()
+
+    assert result["analyzed"] == 1
+    assert result["new_releases"] == 1
+    # Should complete without crashing
+    mock_logger.error.assert_called_with("Error in primary election for release rel_fail: DB Connection Lost")
+
+
 # ── run_analysis regression tests ─────────────────────────────────────────────
 
 def test_run_analysis_no_duplicate_release_for_already_assigned_file(mocker, tmp_path):
