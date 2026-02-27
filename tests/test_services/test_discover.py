@@ -33,10 +33,8 @@ def test_run_discovery_skip_invalid_exts(tmp_path, mocker):
     mock_pb_client = mocker.MagicMock()
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
     
-    # Mock records.items to be empty to simulate new file
-    mock_records = mocker.MagicMock()
-    mock_records.items = []
-    mock_pb_client.collection.return_value.get_list.return_value = mock_records
+    # Mock get_full_list to return empty list (no existing files)
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
 
     result = run_discovery()
 
@@ -65,10 +63,14 @@ def test_run_discovery_update_file(tmp_path, mocker):
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
     
     # Mock existing record with a DIFFERENT hash
-    existing_record = mocker.MagicMock(file_hash="old_hash", id="rec_123")
-    mock_records = mocker.MagicMock()
-    mock_records.items = [existing_record]
-    mock_pb_client.collection.return_value.get_list.return_value = mock_records
+    existing_record = mocker.MagicMock(
+        file_hash="old_hash",
+        id="rec_123",
+        file_path=str(yubal_dir / "existing_song.flac")
+    )
+    # run_discovery now uses get_full_list upfront
+    mock_pb_client.collection.return_value.get_full_list.return_value = [existing_record]
+    # get_list is no longer used for checks
 
     result = run_discovery()
 
@@ -101,9 +103,7 @@ def test_run_discovery_metadata_timeout_skips_file(tmp_path, mocker):
 
     mock_pb_client = mocker.MagicMock()
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
-    mock_records = mocker.MagicMock()
-    mock_records.items = []
-    mock_pb_client.collection.return_value.get_list.return_value = mock_records
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
 
     result = run_discovery()
 
@@ -347,3 +347,34 @@ def test_repair_empty_database(mocker):
     assert result["repaired"] == 0
     assert result["errors"] == []
     mock_pb.collection.return_value.update.assert_not_called()
+
+def test_run_discovery_uses_batch_fetch(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("song1.flac").touch()
+    yubal_dir.joinpath("song2.flac").touch()
+
+    mocker.patch("src.services.discover.stat_fingerprint", return_value="12345:67890")
+    mocker.patch("src.services.discover.extract_metadata", return_value={
+        "codec": "flac", "sample_rate": 44100, "bit_depth": 16,
+        "bitrate": 1411, "duration_seconds": 180,
+        "title": "T", "artist": "A", "album": "AL"
+    })
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+
+    # Mock get_full_list to return empty list
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
+
+    run_discovery()
+
+    # Verify get_full_list was called ONCE with correct query params
+    mock_pb_client.collection.return_value.get_full_list.assert_called_once()
+    call_args = mock_pb_client.collection.return_value.get_full_list.call_args
+    assert "fields" in call_args.kwargs.get('query_params', {})
+
+    # Verify get_list was NOT called (N+1 prevention)
+    mock_pb_client.collection.return_value.get_list.assert_not_called()

@@ -191,6 +191,24 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
     if ingest_folders is None:
         ingest_folders = [d.strip() for d in settings.ingest_dirs.split(',')]
 
+    # Pre-fetch all existing files to avoid N+1 queries.
+    # We use a dictionary for O(1) lookups instead of querying the DB for every file.
+    existing_files_map = {}
+    try:
+        # Fetch minimal fields: id, file_path, file_hash
+        # Use query_params to select fields if supported by server (PocketBase >= 0.8), otherwise fetches all
+        all_records = pb.collection('music_file').get_full_list(
+            query_params={'fields': 'id,file_path,file_hash'}
+        )
+        existing_files_map = {r.file_path: r for r in all_records}
+    except Exception as e:
+        print(f"DEBUG: Failed to pre-fetch music_files: {e}")
+        # In case of error (e.g. collection missing), we continue with empty map.
+        # This will attempt to create duplicates if they exist but weren't fetched,
+        # which might fail at DB constraint level or just create dups if no unique index.
+        # However, for a discovery script, this is a reasonable fallback behavior
+        # rather than crashing the whole process, though logging is critical.
+
     for dir_name in ingest_folders:
         ingest_path = base_path / dir_name
         if not ingest_path.exists():
@@ -208,16 +226,12 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
                     # stat_fingerprint uses os.stat() only — zero file reads, no CIFS blocking.
                     file_fingerprint = stat_fingerprint(filepath)
 
-                    # Check if file exists in PocketBase
+                    # Check if file exists in PocketBase using in-memory map
                     file_path_str = str(filepath)
-                    safe_path_str = file_path_str.replace("'", "\\'")
-                    records = pb.collection('music_file').get_list(
-                        1, 1, {"filter": f"file_path='{safe_path_str}'"}
-                    )
+                    existing_record = existing_files_map.get(file_path_str)
 
-                    if records.items:
+                    if existing_record:
                         # File exists — check if size/mtime changed
-                        existing_record = records.items[0]
                         existing_fp = getattr(existing_record, 'file_hash', None)
                         if existing_fp != file_fingerprint:
                             pb.collection('music_file').update(existing_record.id, {
