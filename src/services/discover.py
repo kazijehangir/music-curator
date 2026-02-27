@@ -6,6 +6,7 @@ import mutagen
 from pocketbase import PocketBase
 
 from src.core.config import settings
+from src.core.security import sanitize_pb_filter
 
 # Seconds to allow for mutagen metadata extraction per file before giving up.
 # Applies as a safety net — stat_fingerprint itself is near-instant.
@@ -210,7 +211,7 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
 
                     # Check if file exists in PocketBase
                     file_path_str = str(filepath)
-                    safe_path_str = file_path_str.replace("'", "\\'")
+                    safe_path_str = sanitize_pb_filter(file_path_str)
                     records = pb.collection('music_file').get_list(
                         1, 1, {"filter": f"file_path='{safe_path_str}'"}
                     )
