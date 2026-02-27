@@ -1,4 +1,15 @@
+
+import os
 import pytest
+from unittest.mock import MagicMock
+
+# Set required environment variables BEFORE importing app or settings
+os.environ["POCKETBASE_ADMIN_EMAIL"] = "admin@example.com"
+os.environ["POCKETBASE_ADMIN_PASSWORD"] = "password"
+os.environ["NAS_MOUNT_PATH"] = "/tmp/nas"
+os.environ["INGEST_BASE_PATH"] = "/tmp/ingest"
+os.environ["MEDIA_LIBRARY_PATH"] = "/tmp/library"
+
 from fastapi.testclient import TestClient
 from src.api.main import app
 
