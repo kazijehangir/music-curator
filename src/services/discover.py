@@ -191,6 +191,20 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
     if ingest_folders is None:
         ingest_folders = [d.strip() for d in settings.ingest_dirs.split(',')]
 
+    # PERFORMANCE OPTIMIZATION (Bolt):
+    # Pre-fetch all existing file records from PocketBase to avoid N+1 query bottlenecks.
+    # We only need `id`, `file_path`, and `file_hash` to detect new/modified files.
+    # `get_full_list` returns a standard Python list of Record objects.
+    print("STATUS: Pre-fetching existing file records from PocketBase for O(1) lookups...")
+    try:
+        existing_records = pb.collection('music_file').get_full_list(
+            query_params={"fields": "id,file_path,file_hash"}
+        )
+        existing_files_map = {getattr(r, 'file_path'): r for r in existing_records}
+    except Exception as e:
+        print(f"ERROR: Failed to pre-fetch file records: {e}")
+        existing_files_map = {}
+
     for dir_name in ingest_folders:
         ingest_path = base_path / dir_name
         if not ingest_path.exists():
@@ -208,22 +222,20 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
                     # stat_fingerprint uses os.stat() only — zero file reads, no CIFS blocking.
                     file_fingerprint = stat_fingerprint(filepath)
 
-                    # Check if file exists in PocketBase
+                    # Check if file exists in PocketBase via O(1) dict lookup instead of N+1 DB queries
                     file_path_str = str(filepath)
-                    safe_path_str = file_path_str.replace("'", "\\'")
-                    records = pb.collection('music_file').get_list(
-                        1, 1, {"filter": f"file_path='{safe_path_str}'"}
-                    )
+                    existing_record = existing_files_map.get(file_path_str)
 
-                    if records.items:
+                    if existing_record:
                         # File exists — check if size/mtime changed
-                        existing_record = records.items[0]
                         existing_fp = getattr(existing_record, 'file_hash', None)
                         if existing_fp != file_fingerprint:
                             pb.collection('music_file').update(existing_record.id, {
                                 'file_hash': file_fingerprint,
                                 'quality_score': None  # Reset so analyze re-runs
                             })
+                            # Update local map to reflect the new state, though it might not be strictly needed here
+                            setattr(existing_record, 'file_hash', file_fingerprint)
                             updated_files_count += 1
                     else:
                         # New file
