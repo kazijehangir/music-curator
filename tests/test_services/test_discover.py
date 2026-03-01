@@ -345,3 +345,53 @@ def test_repair_empty_database(mocker):
     assert result["repaired"] == 0
     assert result["errors"] == []
     mock_pb.collection.return_value.update.assert_not_called()
+
+def test_run_discovery_fetch_existing_files_error(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("song.flac").touch()
+
+    mocker.patch("src.services.discover.stat_fingerprint", return_value="12345:67890")
+    mocker.patch("src.services.discover.extract_metadata", return_value={
+        "codec": "flac", "sample_rate": 44100, "bit_depth": 16, "bitrate": 1411, "duration_seconds": 180,
+        "title": "T", "artist": "A", "album": "A"
+    })
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+
+    # Simulate a failure when fetching existing files
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("DB Error")
+
+    result = run_discovery()
+
+    assert result["status"] == "success"
+    assert result["new_files"] == 1
+    assert result["updated_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "Failed to fetch existing files from PocketBase: DB Error" in result["errors"][0]
+
+def test_run_discovery_general_processing_error(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("song.flac").touch()
+
+    # Throw error to trigger the main loop exception handler
+    mocker.patch("src.services.discover.stat_fingerprint", side_effect=Exception("Processing Failed"))
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
+
+    result = run_discovery()
+
+    assert result["status"] == "success"
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "Error processing" in result["errors"][0]
+    assert "Processing Failed" in result["errors"][0]
