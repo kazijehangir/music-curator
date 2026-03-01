@@ -1,0 +1,4 @@
+## 2024-03-01 - Optimizing File Discovery N+1 Query
+
+**Learning:** When discovering files by looping over the filesystem and querying PocketBase for `music_file` records one by one inside the loop using `get_list(1, 1, {"filter": f"file_path='{safe_path_str}'"})`, we encountered a severe O(N) N+1 query bottleneck. This drastically slowed down processing when scanning thousands of files on remote directories.
+**Action:** Always pre-fetch existing records from PocketBase outside of loops using `get_full_list(query_params={"fields": "id,file_path,file_hash"})` to build an in-memory O(1) dictionary mapping. `query_params` allow fetching only necessary fields minimizing memory consumption when returning thousands of records. Use this pattern for bulk lookups instead of making individual database queries in a loop.
