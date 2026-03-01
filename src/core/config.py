@@ -5,6 +5,7 @@ class Settings(BaseSettings):
     version: str = "3.0.0"
     
     # Internal APIs
+    cors_origins: str = "http://localhost:3000,http://localhost:5173"
     pocketbase_url: str = "http://127.0.0.1:8090" # Used as default if internal env not supplied
     pocketbase_admin_email: str
     pocketbase_admin_password: str
