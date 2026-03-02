@@ -191,6 +191,23 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
     if ingest_folders is None:
         ingest_folders = [d.strip() for d in settings.ingest_dirs.split(',')]
 
+    # ⚡ Bolt Optimization: Pre-fetch all files to avoid N+1 queries.
+    # We only need id, file_path, and file_hash for discovery.
+    # Impact: Reduces discovery time from O(N) database queries to O(1) query + O(1) lookup per file.
+    try:
+        all_records = pb.collection('music_file').get_full_list(
+            query_params={"fields": "id,file_path,file_hash"}
+        )
+        existing_files_dict = {getattr(r, 'file_path'): r for r in all_records}
+    except Exception as e:
+        errors.append(f"Failed to pre-fetch files from PocketBase: {e}")
+        return {
+            "status": "error",
+            "new_files": 0,
+            "updated_files": 0,
+            "errors": errors
+        }
+
     for dir_name in ingest_folders:
         ingest_path = base_path / dir_name
         if not ingest_path.exists():
@@ -210,14 +227,10 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
 
                     # Check if file exists in PocketBase
                     file_path_str = str(filepath)
-                    safe_path_str = file_path_str.replace("'", "\\'")
-                    records = pb.collection('music_file').get_list(
-                        1, 1, {"filter": f"file_path='{safe_path_str}'"}
-                    )
+                    existing_record = existing_files_dict.get(file_path_str)
 
-                    if records.items:
+                    if existing_record:
                         # File exists — check if size/mtime changed
-                        existing_record = records.items[0]
                         existing_fp = getattr(existing_record, 'file_hash', None)
                         if existing_fp != file_fingerprint:
                             pb.collection('music_file').update(existing_record.id, {
