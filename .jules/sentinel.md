@@ -1,0 +1,4 @@
+## 2024-03-03 - [Fix: Overly Permissive CORS Configuration]
+**Vulnerability:** FastAPIs `allow_origins` array was configured with `["*"]` directly in `src/api/main.py`. This essentially permits cross-origin requests from any client domain, circumventing Same Origin Policies. Such a misconfiguration permits websites or bad actors to potentially read data accessed through authenticated sessions if CORS cookies were supported, or spoof endpoints.
+**Learning:** Hard-coded security primitives, especially those with global wildcards, shouldn't exist in environments handling file operations like symlinking and tagging. A strict dependency between the ASGI settings and environment-injected arrays should be upheld.
+**Prevention:** Incorporate a `cors_origins` config attribute defined as a default safe domain pool (e.g. `http://localhost:3000`), parsed and enforced across CORS middlewares dynamically.
