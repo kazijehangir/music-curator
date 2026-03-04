@@ -1,0 +1,4 @@
+## 2024-10-24 - Command Argument Injection via File Paths
+**Vulnerability:** In `src/services/tagging.py`, the `subprocess.run` command used to call `beet import` passed the `file_path` as a positional argument without a `--` separator. If a file path started with a hyphen (e.g., `-rf`), it could be misinterpreted as a command-line flag by the `beet` command, leading to command argument injection.
+**Learning:** External CLI commands that accept file paths or user-controlled strings as positional arguments can be tricked into interpreting them as options or flags if they start with a hyphen.
+**Prevention:** When executing external CLI commands via `subprocess.run` with user-controlled file paths, always include the `--` separator before the positional path argument to explicitly signal the end of options and prevent argument injection.
