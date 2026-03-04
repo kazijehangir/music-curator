@@ -1,0 +1,3 @@
+## 2025-03-04 - PocketBase Discovery N+1 Query Elimination
+**Learning:** During the file discovery process (`src/services/discover.py`), calling `get_list` sequentially for every file to check for existence causes a massive N+1 query bottleneck. Calling PocketBase iteratively inside the `os.walk` loop generates excessive HTTP overhead, especially when parsing large music libraries.
+**Action:** When iterating over a directory to process multiple records, always pre-fetch the existing state using `get_full_list` (restricted with `query_params` like `filter` and `fields` to minimize memory overhead), map the result into a Python dictionary, and use local key lookups inside the loop instead of making individual database queries.
