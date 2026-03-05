@@ -343,3 +343,49 @@ def test_repair_empty_database(mocker):
     assert result["repaired"] == 0
     assert result["errors"] == []
     mock_pb.collection.return_value.update.assert_not_called()
+
+def test_run_discovery_prefetch_error_skips_folder(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("song.flac").touch()
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+
+    # Mock get_full_list to raise an exception
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("DB Timeout")
+
+    result = run_discovery()
+
+    assert result["status"] == "success"
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "Error pre-fetching records for yubal: DB Timeout" in result["errors"][0]
+
+
+def test_run_discovery_processing_error(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("song.flac").touch()
+
+    # Mock get_pb_client locally to return dummy structure
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
+
+    # Mock stat_fingerprint to raise an exception
+    mocker.patch("src.services.discover.stat_fingerprint", side_effect=Exception("Stat Failed"))
+
+    result = run_discovery()
+
+    assert result["status"] == "success"
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "Error processing" in result["errors"][0]
+    assert "Stat Failed" in result["errors"][0]
