@@ -197,6 +197,20 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
             continue
             
         print(f"STATUS: Scanning folder: {dir_name}")
+
+        # Pre-fetch all files for this directory to avoid N+1 queries
+        dir_records = pb.collection('music_file').get_full_list(
+            query_params={
+                "filter": f"source_dir='{dir_name}'",
+                "fields": "id,file_path,file_hash"
+            }
+        )
+        existing_files_map = {
+            getattr(record, 'file_path'): record
+            for record in dir_records
+            if hasattr(record, 'file_path')
+        }
+
         for root, _, files in os.walk(ingest_path):
             for file in files:
                 filepath = Path(root) / file
@@ -207,17 +221,11 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
                 try:
                     # stat_fingerprint uses os.stat() only — zero file reads, no CIFS blocking.
                     file_fingerprint = stat_fingerprint(filepath)
-
-                    # Check if file exists in PocketBase
                     file_path_str = str(filepath)
-                    safe_path_str = file_path_str.replace("'", "\\'")
-                    records = pb.collection('music_file').get_list(
-                        1, 1, {"filter": f"file_path='{safe_path_str}'"}
-                    )
 
-                    if records.items:
+                    if file_path_str in existing_files_map:
                         # File exists — check if size/mtime changed
-                        existing_record = records.items[0]
+                        existing_record = existing_files_map[file_path_str]
                         existing_fp = getattr(existing_record, 'file_hash', None)
                         if existing_fp != file_fingerprint:
                             pb.collection('music_file').update(existing_record.id, {
