@@ -1,0 +1,3 @@
+## 2024-05-18 - PocketBase N+1 Query Bottleneck
+**Learning:** Checking for file existence sequentially using `get_list` in a file discovery loop causes severe N+1 query bottlenecks and slows down the scan of large directories significantly. This is specific to how PocketBase handles repeated REST API network requests compared to raw SQL queries.
+**Action:** When performing existence checks or bulk matching over a predictable domain (like all files in a specific `source_dir`), always use `get_full_list` with targeted `fields` beforehand to pre-fetch the data into an in-memory dictionary. This drops the query count from O(N) to O(1) without exhausting memory.
