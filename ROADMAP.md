@@ -8,6 +8,7 @@ This file tracks the implementation progress of the Music Curator pipeline based
 * [x] **API Scaffolding**: FastAPI structure, basic endpoints, pytest setup, systemd deployments.
 * [x] **Deploy PocketBase**: Set up collections (`music_release`, `music_file`, `music_metadata_source`).
 * [x] **Implement `/api/discover`**: Logic to walk ingest directories, hash files, extract metadata via `mutagen`, and insert into PocketBase.
+* [x] **Optimize Discovery**: Convert N+1 query loops to O(1) in-memory lookups via bulk fetching.
 
 ## Phase 2: Fingerprinting + Quality + Dedup (Days 7–14)
 
