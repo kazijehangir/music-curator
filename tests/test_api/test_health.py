@@ -1,3 +1,20 @@
+def test_cors_options_request(client):
+    """Verify that CORS is correctly configured based on settings."""
+    # Based on the fixture in tests/conftest.py which uses the FastAPI app.
+    # The CORS_ORIGINS is parsed from the environment.
+    # Since we cannot easily overwrite settings after app initialization in TestClient without a complex setup,
+    # we just send an OPTIONS request from an allowed origin if it exists, but usually we can check CORS headers.
+    headers = {
+        "Origin": "http://localhost:3000",
+        "Access-Control-Request-Method": "GET"
+    }
+    response = client.options("/api/health", headers=headers)
+    assert response.status_code == 200
+    # The server should echo back the origin if it matches the CORS settings.
+    # If the tests are run with CORS_ORIGINS=http://localhost:3000, this will match.
+    assert "access-control-allow-origin" in response.headers
+
+
 def test_health_check(client):
     response = client.get("/api/health")
     assert response.status_code == 200
