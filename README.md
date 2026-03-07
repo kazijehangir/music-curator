@@ -105,6 +105,10 @@ scripts/          # Setup and deployment scripts
 - `POST /api/release/{id}/reanalyze`: Manual trigger for updates.
 - `GET /api/health`: Validates the health of the system pipeline.
 
+## Performance Optimizations
+The system includes targeted performance optimizations to handle large media libraries efficiently:
+- **O(1) Discovery**: The `discover` service pre-fetches directory state from PocketBase using `get_full_list` to avoid the N+1 query problem during deep filesystem walks, reducing network overhead.
+
 ## Environment Variables
 
 ### n8n Configuration

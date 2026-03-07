@@ -1,0 +1,3 @@
+## 2024-05-14 - Pre-fetching PocketBase records to avoid N+1 queries during discovery
+**Learning:** The pipeline performs deep directory traversal using `os.walk` in `src/services/discover.py` and originally made an individual database query (`get_list`) to check for the existence of every single file. This N+1 query pattern creates massive network and database overhead as the music library grows.
+**Action:** When querying PocketBase within loops, especially for existance checks or lookups, pre-fetch the necessary scope of records into an in-memory dictionary using `get_full_list()`. To minimize memory impact during bulk fetches, use `query_params={'fields': '...'}` to request only the required columns (e.g., `id`, `file_path`, `file_hash`).
