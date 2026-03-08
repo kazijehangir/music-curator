@@ -53,3 +53,21 @@ def test_pass_3_llm(mock_pocketbase, mock_httpx):
     # Called for 4 fields (title, artist, genre, language - album is null)
     assert mock_pocketbase.collection.return_value.create.call_count == 4
     assert stats["llm_processed"] == 1
+
+def test_pass_1_beets_security_separator(mocker):
+    from src.services.tagging import _pass_1_beets
+
+    mock_run = mocker.patch("src.services.tagging.subprocess.run")
+    mocker.patch("src.services.tagging.mutagen.File", return_value=None)
+
+    file_record = mocker.MagicMock()
+    file_record.file_path = "-v-malicious-file.mp3"
+
+    _pass_1_beets(file_record)
+
+    assert mock_run.call_count == 1
+    cmd_args = mock_run.call_args[0][0]
+
+    assert "--" in cmd_args
+    assert cmd_args[-2] == "--"
+    assert cmd_args[-1] == "-v-malicious-file.mp3"
