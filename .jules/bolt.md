@@ -1,0 +1,3 @@
+## 2024-05-24 - [N+1 query bottlenecks in PocketBase]
+**Learning:** Using `get_full_list` with `query_params={'fields': 'id,file_path,file_hash'}` to pre-fetch records into an in-memory dictionary resolves N+1 bottlenecks in PocketBase loops, while keeping memory usage extremely low.
+**Action:** When iterating over a directory or a list of items that require database checks, bulk-fetch the required partial records first, map them to a dictionary, and perform O(1) lookups instead of making sequential `get_list` API calls inside the loop. Let queries fail fast instead of silencing them to prevent massive duplicate inserts.

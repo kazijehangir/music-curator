@@ -197,6 +197,25 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
             continue
             
         print(f"STATUS: Scanning folder: {dir_name}")
+
+        # ⚡ Bolt Optimization: Pre-fetch all files for this directory to prevent N+1 query bottleneck
+        # Fetching partial records (id, file_path, file_hash) keeps memory footprint low.
+        safe_dir_name = dir_name.replace("'", "\\'")
+        try:
+            existing_files = pb.collection('music_file').get_full_list(
+                query_params={
+                    "filter": f"source_dir='{safe_dir_name}'",
+                    "fields": "id,file_path,file_hash"
+                }
+            )
+            # Create an O(1) lookup dictionary keyed by exact file path string
+            existing_files_dict = {f.file_path: f for f in existing_files}
+            use_prefetch = True
+        except Exception as e:
+            errors.append(f"Failed to pre-fetch files for {dir_name}: {e}. Falling back to N+1 queries.")
+            use_prefetch = False
+            existing_files_dict = {}
+
         for root, _, files in os.walk(ingest_path):
             for file in files:
                 filepath = Path(root) / file
@@ -207,17 +226,20 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
                 try:
                     # stat_fingerprint uses os.stat() only — zero file reads, no CIFS blocking.
                     file_fingerprint = stat_fingerprint(filepath)
-
-                    # Check if file exists in PocketBase
                     file_path_str = str(filepath)
-                    safe_path_str = file_path_str.replace("'", "\\'")
-                    records = pb.collection('music_file').get_list(
-                        1, 1, {"filter": f"file_path='{safe_path_str}'"}
-                    )
 
-                    if records.items:
+                    if use_prefetch:
+                        # O(1) dictionary lookup instead of N+1 pb.collection('music_file').get_list(...)
+                        existing_record = existing_files_dict.get(file_path_str)
+                    else:
+                        safe_path_str = file_path_str.replace("'", "\\'")
+                        records = pb.collection('music_file').get_list(
+                            1, 1, {"filter": f"file_path='{safe_path_str}'"}
+                        )
+                        existing_record = records.items[0] if records.items else None
+
+                    if existing_record:
                         # File exists — check if size/mtime changed
-                        existing_record = records.items[0]
                         existing_fp = getattr(existing_record, 'file_hash', None)
                         if existing_fp != file_fingerprint:
                             pb.collection('music_file').update(existing_record.id, {
