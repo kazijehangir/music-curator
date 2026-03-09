@@ -84,6 +84,48 @@ def test_run_discovery_update_file(tmp_path, mocker):
     })
 
 
+def test_run_discovery_fallback_to_n1_on_prefetch_error(tmp_path, mocker):
+    """If prefetch fails, the loop continues and falls back to N+1 querying."""
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("fallback_song.flac").touch()
+
+    mocker.patch("src.services.discover.stat_fingerprint", return_value="12345:67890")
+    mocker.patch("src.services.discover.extract_metadata", return_value={})
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+
+    # Make get_full_list throw an exception
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("Network timeout")
+
+    # But get_list succeeds and returns an existing record to update
+    existing_record = mocker.MagicMock(
+        file_hash="old_hash",
+        id="rec_fallback",
+        file_path=str(yubal_dir / "fallback_song.flac")
+    )
+    mock_records = mocker.MagicMock()
+    mock_records.items = [existing_record]
+    mock_pb_client.collection.return_value.get_list.return_value = mock_records
+
+    result = run_discovery()
+
+    # Pre-fetch fails, so one error is logged
+    assert len(result["errors"]) == 1
+    assert "Failed to pre-fetch" in result["errors"][0]
+
+    # But the fallback works, so the file is still successfully updated
+    assert result["updated_files"] == 1
+    mock_pb_client.collection.return_value.get_list.assert_called_once()
+    mock_pb_client.collection.return_value.update.assert_called_with("rec_fallback", {
+        'file_hash': '12345:67890',
+        'quality_score': None
+    })
+
+
 def test_run_discovery_metadata_timeout_skips_file(tmp_path, mocker):
     """If extract_metadata times out (stalled CIFS), the file is skipped and logged."""
     mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
