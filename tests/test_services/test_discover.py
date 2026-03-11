@@ -79,6 +79,28 @@ def test_run_discovery_update_file(tmp_path, mocker):
     })
 
 
+def test_run_discovery_fetch_existing_records_error(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("song.flac").touch()
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+
+    # Simulate an error when calling get_full_list
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("Database error")
+
+    result = run_discovery()
+
+    assert result["status"] == "success"
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "Failed to fetch existing records for directory yubal" in result["errors"][0]
+
+
 def test_run_discovery_metadata_timeout_skips_file(tmp_path, mocker):
     """If extract_metadata times out (stalled CIFS), the file is skipped and logged."""
     mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
