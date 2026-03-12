@@ -341,3 +341,67 @@ def test_repair_empty_database(mocker):
     assert result["repaired"] == 0
     assert result["errors"] == []
     mock_pb.collection.return_value.update.assert_not_called()
+
+def test_run_discovery_prefetch_error_skips_dir(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("song.flac").touch()
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("Database unavailable")
+
+    result = run_discovery()
+
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "Database unavailable" in result["errors"][0]
+
+def test_run_discovery_skip_unsupported_extensions(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("song.txt").touch()
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
+
+    result = run_discovery()
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+
+def test_extract_metadata_error_handling(tmp_path, mocker):
+    dummy = tmp_path / "broken.flac"
+    dummy.touch()
+
+    mocker.patch("src.services.discover.mutagen.File", side_effect=Exception("Corrupt file"))
+
+    meta = extract_metadata(dummy)
+    assert meta["codec"] is None
+    assert meta["duration_seconds"] is None
+
+
+def test_run_discovery_catches_processing_error(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("song.flac").touch()
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
+
+    # Force an error by mocking stat_fingerprint to raise an exception
+    mocker.patch("src.services.discover.stat_fingerprint", side_effect=Exception("stat error"))
+
+    result = run_discovery()
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "stat error" in result["errors"][0]
