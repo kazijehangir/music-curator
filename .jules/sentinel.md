@@ -1,0 +1,4 @@
+## 2024-05-24 - Argument Injection in Subprocess Run
+**Vulnerability:** A command argument injection vulnerability was identified in `src/services/tagging.py` (`_pass_1_beets`), where a user-controlled file path could be misinterpreted as a command-line flag if it started with a hyphen.
+**Learning:** External CLI commands (e.g., `beet`) executed via `subprocess.run` are susceptible to argument injection if file paths are not explicitly separated from options.
+**Prevention:** Always include the `--` separator before positional path arguments when using `subprocess.run` to ensure paths starting with hyphens are not evaluated as command-line flags.
