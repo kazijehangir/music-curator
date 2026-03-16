@@ -33,10 +33,8 @@ def test_run_discovery_skip_invalid_exts(tmp_path, mocker):
     mock_pb_client = mocker.MagicMock()
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
     
-    # Mock records.items to be empty to simulate new file
-    mock_records = mocker.MagicMock()
-    mock_records.items = []
-    mock_pb_client.collection.return_value.get_list.return_value = mock_records
+    # Mock get_full_list to return empty to simulate new file
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
 
     result = run_discovery()
 
@@ -59,16 +57,17 @@ def test_run_discovery_update_file(tmp_path, mocker):
     yubal_dir.joinpath("existing_song.flac").touch()
 
     mocker.patch("src.services.discover.stat_fingerprint", return_value="12345:67890")
-    mocker.patch("src.services.discover.extract_metadata", return_value={})
+    mocker.patch("src.services.discover.extract_metadata", return_value={
+        "codec": "flac", "sample_rate": 44100, "bit_depth": 16, "bitrate": 1411,
+        "duration_seconds": 180, "title": "T", "artist": "A", "album": "A"
+    })
     
     mock_pb_client = mocker.MagicMock()
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
     
-    # Mock existing record with a DIFFERENT hash
-    existing_record = mocker.MagicMock(file_hash="old_hash", id="rec_123")
-    mock_records = mocker.MagicMock()
-    mock_records.items = [existing_record]
-    mock_pb_client.collection.return_value.get_list.return_value = mock_records
+    # Mock existing record with a DIFFERENT hash via get_full_list
+    existing_record = mocker.MagicMock(file_hash="old_hash", id="rec_123", file_path=str(yubal_dir / "existing_song.flac"))
+    mock_pb_client.collection.return_value.get_full_list.return_value = [existing_record]
 
     result = run_discovery()
 
@@ -101,9 +100,7 @@ def test_run_discovery_metadata_timeout_skips_file(tmp_path, mocker):
 
     mock_pb_client = mocker.MagicMock()
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
-    mock_records = mocker.MagicMock()
-    mock_records.items = []
-    mock_pb_client.collection.return_value.get_list.return_value = mock_records
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
 
     result = run_discovery()
 
@@ -347,3 +344,73 @@ def test_repair_empty_database(mocker):
     assert result["repaired"] == 0
     assert result["errors"] == []
     mock_pb.collection.return_value.update.assert_not_called()
+
+def test_run_discovery_prefetch_fails(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("song.flac").touch()
+
+    # mock get_pb_client locally to return dummy structure
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+
+    # Mock get_full_list to throw an exception
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("DB error")
+
+    result = run_discovery()
+
+    assert result["status"] == "success"
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "Failed to pre-fetch" in result["errors"][0]
+
+
+def test_run_discovery_prefetch_missing_filepath(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("song.flac").touch()
+
+    # mock get_pb_client locally to return dummy structure
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mocker.patch("src.services.discover.stat_fingerprint", return_value="12345:67890")
+    mocker.patch("src.services.discover.extract_metadata", return_value={
+        "codec": "flac", "sample_rate": 44100, "bit_depth": 16, "bitrate": 1411,
+        "duration_seconds": 180, "title": "T", "artist": "A", "album": "A"
+    })
+
+    # Mock get_full_list to return a record without file_path
+    bad_record = mocker.MagicMock()
+    bad_record.file_path = None
+    mock_pb_client.collection.return_value.get_full_list.return_value = [bad_record]
+
+    result = run_discovery()
+
+    assert result["status"] == "success"
+    # Should be treated as new file
+    assert result["new_files"] == 1
+
+def test_run_discovery_inner_loop_exception(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("song.flac").touch()
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
+
+    mocker.patch("src.services.discover.stat_fingerprint", side_effect=Exception("stat error"))
+
+    result = run_discovery()
+
+    assert result["status"] == "success"
+    assert result["new_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "stat error" in result["errors"][0]
