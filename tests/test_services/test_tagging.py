@@ -1,12 +1,30 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import json
-from src.services.tagging import _pass_2_sidecars, _pass_3_llm, run_tagging, process_release
+from src.services.tagging import _pass_1_beets, _pass_2_sidecars, _pass_3_llm, run_tagging, process_release
 
 @pytest.fixture
 def mock_httpx():
     with patch("src.services.tagging.httpx.post") as mock_post:
         yield mock_post
+
+def test_pass_1_beets_command_injection_prevention(mocker):
+    # Verify that the subprocess call correctly includes the `--` argument separator
+    mock_subprocess = mocker.patch("src.services.tagging.subprocess.run")
+    mock_mutagen = mocker.patch("src.services.tagging.mutagen.File")
+    mock_mutagen.return_value = None
+
+    file_record = MagicMock()
+    file_record.file_path = "/path/to/-malicious-file.mp3"
+
+    _pass_1_beets(file_record)
+
+    mock_subprocess.assert_called_once()
+    cmd_args = mock_subprocess.call_args[0][0]
+
+    assert "--" in cmd_args, "Security fix missing: `--` separator not found in command arguments"
+    assert cmd_args[-1] == "/path/to/-malicious-file.mp3", "File path should be the last argument"
+    assert cmd_args[-2] == "--", "`--` should immediately precede the file path"
 
 def test_pass_2_sidecars(mock_pocketbase, fs):
     # Setup realistic file structure

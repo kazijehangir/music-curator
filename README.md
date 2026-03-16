@@ -139,5 +139,8 @@ Tasks run in isolated process groups (`start_new_session=True`). The service det
 We use systemd to run this automatically. To deploy standard changes, use:
 `./scripts/deploy_service.sh`
 
+## Security Best Practices
+- **Subprocess Execution**: When calling external commands using `subprocess.run` (e.g., `beet`), always use the `--` argument separator to ensure user-controlled file paths are treated purely as positional arguments and prevent command argument injection.
+
 ## Important Contribution Guidelines
 If you are an AI assistant or human modifying this project, you **MUST** review the rules outlined in `AGENT_RULES.md`.
