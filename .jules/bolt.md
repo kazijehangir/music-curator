@@ -1,0 +1,3 @@
+## 2024-03-17 - N+1 Query Bottleneck in File Discovery
+**Learning:** During file discovery operations (`run_discovery` in `src/services/discover.py`), calling `pb.collection('music_file').get_list` to check if a file exists inside an `os.walk` loop creates a severe N+1 query problem, slowing down the processing of large folders.
+**Action:** When iterating over a batch of resources (like files in a folder), always pre-fetch the existing records for that specific batch or folder context in a single query (using `get_full_list`) and create an in-memory dictionary lookup. This turns N database queries into 1 query and N O(1) dictionary lookups.
