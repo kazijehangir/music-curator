@@ -53,3 +53,38 @@ def test_pass_3_llm(mock_pocketbase, mock_httpx):
     # Called for 4 fields (title, artist, genre, language - album is null)
     assert mock_pocketbase.collection.return_value.create.call_count == 4
     assert stats["llm_processed"] == 1
+
+from src.services.tagging import _pass_1_beets
+
+def test_pass_1_beets_success(mock_pocketbase, fs):
+    """Test that beets import is called correctly with the -- separator."""
+    fs.create_file("/test/-weird-song.flac", contents="binary data")
+
+    file_record = MagicMock()
+    file_record.id = "file123"
+    file_record.file_path = "/test/-weird-song.flac"
+
+    with patch("src.services.tagging.subprocess.run") as mock_run:
+        with patch("src.services.tagging.mutagen.File") as mock_mutagen:
+            # Setup mutagen mock to return None so we just test the subprocess call
+            mock_mutagen.return_value = None
+
+            _pass_1_beets(file_record)
+
+            mock_run.assert_called_once()
+            args = mock_run.call_args[0][0]
+            assert args[-1] == "/test/-weird-song.flac"
+            assert args[-2] == "--"
+            assert mock_run.call_args[1].get("capture_output") is True
+
+def test_pass_1_beets_failure_handled(mock_pocketbase, fs):
+    """Test that beets exception is caught and logged."""
+    fs.create_file("/test/song.flac", contents="binary data")
+    file_record = MagicMock()
+    file_record.id = "file123"
+    file_record.file_path = "/test/song.flac"
+
+    with patch("src.services.tagging.subprocess.run", side_effect=Exception("Beets crashed")):
+        # Should not raise
+        result = _pass_1_beets(file_record)
+        assert result is None
