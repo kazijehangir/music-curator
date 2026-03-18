@@ -197,6 +197,15 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
             continue
             
         print(f"STATUS: Scanning folder: {dir_name}")
+
+        # Batch-fetch all existing files for this directory to avoid N+1 queries
+        # (avoiding the broad try-except with fallback to empty dict here, so it fails fast on DB/network error)
+        safe_dir_name = dir_name.replace("'", "\\'")
+        existing_records_list = pb.collection('music_file').get_full_list(
+            query_params={"filter": f"source_dir='{safe_dir_name}'"}
+        )
+        existing_files = {getattr(r, 'file_path'): r for r in existing_records_list if getattr(r, 'file_path', None)}
+
         for root, _, files in os.walk(ingest_path):
             for file in files:
                 filepath = Path(root) / file
@@ -210,14 +219,10 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
 
                     # Check if file exists in PocketBase
                     file_path_str = str(filepath)
-                    safe_path_str = file_path_str.replace("'", "\\'")
-                    records = pb.collection('music_file').get_list(
-                        1, 1, {"filter": f"file_path='{safe_path_str}'"}
-                    )
 
-                    if records.items:
+                    if file_path_str in existing_files:
                         # File exists — check if size/mtime changed
-                        existing_record = records.items[0]
+                        existing_record = existing_files[file_path_str]
                         existing_fp = getattr(existing_record, 'file_hash', None)
                         if existing_fp != file_fingerprint:
                             pb.collection('music_file').update(existing_record.id, {

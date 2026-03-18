@@ -1,0 +1,3 @@
+## 2025-02-26 - Fix N+1 queries in file discovery
+**Learning:** In `src/services/discover.py`, iterating over `os.walk` and querying PocketBase for `get_list` per file caused a severe N+1 problem. To optimize, `get_full_list` should be used per directory, placing results into a dictionary for fast in-memory lookups. Do not use a broad `try/except` block falling back to an empty dictionary, let the query fail fast.
+**Action:** Batch fetch PocketBase existing file records for a directory and utilize a dictionary for fast file lookups during file discovery to mitigate network bottleneck and prevent N+1 queries.
