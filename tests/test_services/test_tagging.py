@@ -1,12 +1,31 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import json
-from src.services.tagging import _pass_2_sidecars, _pass_3_llm, run_tagging, process_release
+from src.services.tagging import _pass_1_beets, _pass_2_sidecars, _pass_3_llm, run_tagging, process_release
 
 @pytest.fixture
 def mock_httpx():
     with patch("src.services.tagging.httpx.post") as mock_post:
         yield mock_post
+
+@patch("src.services.tagging.subprocess.run")
+@patch("src.services.tagging.mutagen.File")
+def test_pass_1_beets(mock_mutagen, mock_run):
+    # Test that beets subprocess is called with proper arguments including `--`
+    mock_file = MagicMock()
+    mock_file.file_path = "/path/to/-hyphen-file.mp3"
+
+    mock_mutagen.return_value = None # Simplified
+
+    _pass_1_beets(mock_file)
+
+    mock_run.assert_called_once()
+    args, kwargs = mock_run.call_args
+    cmd = args[0]
+
+    assert "--" in cmd
+    assert cmd[-1] == "/path/to/-hyphen-file.mp3"
+    assert cmd[-2] == "--"
 
 def test_pass_2_sidecars(mock_pocketbase, fs):
     # Setup realistic file structure
