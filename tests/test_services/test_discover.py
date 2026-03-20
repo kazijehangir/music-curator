@@ -108,6 +108,50 @@ def test_run_discovery_metadata_timeout_skips_file(tmp_path, mocker):
     # PocketBase create was never called
     mock_pb_client.collection.return_value.create.assert_not_called()
 
+def test_run_discovery_get_full_list_exception(tmp_path, mocker):
+    """If get_full_list raises an exception, the directory is skipped and an error is logged."""
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("song.flac").touch()
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("DB Connection Error")
+
+    result = run_discovery()
+
+    # Directory is skipped, not counted as new/updated, error is added
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "Database error fetching existing files for yubal: DB Connection Error" in result["errors"][0]
+
+def test_run_discovery_file_processing_error(tmp_path, mocker):
+    """If an arbitrary exception occurs while processing a file inside the os.walk loop, it is logged and execution continues."""
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("song.flac").touch()
+
+    # Mock get_full_list to return empty to simulate new file
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
+
+    # Mock stat_fingerprint to raise an exception
+    mocker.patch("src.services.discover.stat_fingerprint", side_effect=Exception("Stat Error"))
+
+    result = run_discovery()
+
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "Error processing" in result["errors"][0]
+    assert "Stat Error" in result["errors"][0]
+
 
 # ── extract_metadata ───────────────────────────────────────────────────────────
 
