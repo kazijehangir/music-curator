@@ -180,7 +180,9 @@ def _pass_1_beets(primary_file) -> Optional[str]:
         
     try:
         beet_bin = str(Path(sys.executable).parent / "beet")
-        cmd = [beet_bin, "import", "-q", "-C", "-s", str(file_path)]
+        # Security: Use '--' separator to prevent command argument injection
+        # if the user-controlled file_path starts with a hyphen (e.g. '-h').
+        cmd = [beet_bin, "import", "-q", "-C", "-s", "--", str(file_path)]
         subprocess.run(cmd, capture_output=True, text=True)
         
         f = mutagen.File(file_path)
