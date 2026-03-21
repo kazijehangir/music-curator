@@ -195,10 +195,9 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
     # to avoid making a sequential DB query for every single file on disk (N+1 query problem).
     # Fetching only the needed fields minimizes memory and network overhead.
     try:
-        # Note: Do not use fields filtering, as the create/update calls expect
-        # full records if logic relies on it, though we only use 'id' and 'file_hash'
-        # for checking size/mtime change.
-        all_existing_files = pb.collection('music_file').get_full_list()
+        all_existing_files = pb.collection('music_file').get_full_list(
+            query_params={"fields": "id,file_path,file_hash"}
+        )
         existing_files_dict = {getattr(f, 'file_path', ''): f for f in all_existing_files}
     except Exception as e:
         print(f"DEBUG: Failed to bulk fetch existing files: {e}")
