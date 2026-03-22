@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import json
-from src.services.tagging import _pass_2_sidecars, _pass_3_llm, run_tagging, process_release
+from src.services.tagging import _pass_1_beets, _pass_2_sidecars, _pass_3_llm, run_tagging, process_release
 
 @pytest.fixture
 def mock_httpx():
@@ -53,3 +53,23 @@ def test_pass_3_llm(mock_pocketbase, mock_httpx):
     # Called for 4 fields (title, artist, genre, language - album is null)
     assert mock_pocketbase.collection.return_value.create.call_count == 4
     assert stats["llm_processed"] == 1
+
+@patch("src.services.tagging.subprocess.run")
+@patch("src.services.tagging.mutagen.File")
+def test_pass_1_beets_command_injection_prevention(mock_mutagen, mock_subprocess_run):
+    file_record = MagicMock()
+    file_record.file_path = "/test/-rf_sneaky_file.opus"
+
+    # Mock mutagen so it doesn't try to actually read the file
+    mock_mutagen.return_value = None
+
+    _pass_1_beets(file_record)
+
+    # Verify subprocess.run was called
+    assert mock_subprocess_run.called
+
+    # Check that '--' is used before the file path
+    cmd_args = mock_subprocess_run.call_args[0][0]
+    assert "--" in cmd_args
+    assert cmd_args[-2] == "--"
+    assert cmd_args[-1] == "/test/-rf_sneaky_file.opus"
