@@ -191,6 +191,13 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
     if ingest_folders is None:
         ingest_folders = [d.strip() for d in settings.ingest_dirs.split(',')]
 
+    # Pre-fetch all files to optimize sequential DB queries inside the loop (N+1 problem)
+    # Caching them in an in-memory dictionary is a highly performant pattern.
+    # We do not wrap this in a broad try/except, as database failures here should fast-fail
+    # rather than treating all files as new and causing massive duplicate inserts.
+    all_records = pb.collection('music_file').get_full_list()
+    existing_files_map = {getattr(rec, 'file_path', ''): rec for rec in all_records}
+
     for dir_name in ingest_folders:
         ingest_path = base_path / dir_name
         if not ingest_path.exists():
@@ -208,16 +215,12 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
                     # stat_fingerprint uses os.stat() only — zero file reads, no CIFS blocking.
                     file_fingerprint = stat_fingerprint(filepath)
 
-                    # Check if file exists in PocketBase
+                    # Check if file exists in pre-fetched PocketBase records
                     file_path_str = str(filepath)
-                    safe_path_str = file_path_str.replace("'", "\\'")
-                    records = pb.collection('music_file').get_list(
-                        1, 1, {"filter": f"file_path='{safe_path_str}'"}
-                    )
+                    existing_record = existing_files_map.get(file_path_str)
 
-                    if records.items:
+                    if existing_record:
                         # File exists — check if size/mtime changed
-                        existing_record = records.items[0]
                         existing_fp = getattr(existing_record, 'file_hash', None)
                         if existing_fp != file_fingerprint:
                             pb.collection('music_file').update(existing_record.id, {
