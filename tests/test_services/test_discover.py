@@ -79,6 +79,47 @@ def test_run_discovery_update_file(tmp_path, mocker):
     })
 
 
+def test_run_discovery_get_full_list_exception(tmp_path, mocker):
+    """If get_full_list throws an exception, run_discovery should catch it and return an error status."""
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("Database connection failed")
+
+    result = run_discovery()
+
+    assert result["status"] == "error"
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "Database connection failed" in result["errors"][0]
+
+
+def test_run_discovery_individual_file_processing_error(tmp_path, mocker):
+    """If processing an individual file throws an exception, run_discovery should catch it, log the error, and continue."""
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("error_song.flac").touch()
+
+    # Make stat_fingerprint raise an exception to simulate a processing error
+    mocker.patch("src.services.discover.stat_fingerprint", side_effect=Exception("File system error"))
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
+
+    result = run_discovery()
+
+    assert result["status"] == "success"
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "File system error" in result["errors"][0]
+
+
 def test_run_discovery_metadata_timeout_skips_file(tmp_path, mocker):
     """If extract_metadata times out (stalled CIFS), the file is skipped and logged."""
     mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
