@@ -1,0 +1,4 @@
+## 2025-02-15 - [Prevent Command Argument Injection in Beets Import]
+**Vulnerability:** A command argument injection vulnerability existed in `_pass_1_beets` (`src/services/tagging.py`) where a user-controlled file path was passed directly as a positional argument to the `beet import` command without a `--` separator.
+**Learning:** If a file path starts with a hyphen (e.g., `-h` or `--config`), the `beet` CLI (and many other standard CLI tools) will interpret it as a command-line flag rather than a target file, which can lead to unintended command execution, configuration overrides, or denial of service.
+**Prevention:** Always use the `--` standard POSIX separator before passing variable positional arguments (like file paths) to external CLI commands via `subprocess.run` to ensure they are strictly interpreted as positional arguments and not flags.
