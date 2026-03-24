@@ -1,0 +1,4 @@
+## 2024-05-24 - [Unsafe Manual Filter Construction]
+**Vulnerability:** Constructing PocketBase queries manually with string replacement (`file_path_str.replace("'", "\\'")`) leaves applications vulnerable to filter injection if the input handles backslashes or other meta-characters unexpectedly.
+**Learning:** Manual escaping strategies are inherently brittle and often miss edge cases, especially in non-SQL database query languages. While the JS PocketBase SDK provides robust internal escaping via `pb.filter()`, the Python SDK lacks this feature natively.
+**Prevention:** Always use a dedicated, well-tested sanitizer function (like `sanitize_pb_filter`) to construct safe filter strings in Python, ensuring backslashes are escaped before single quotes to prevent escape-character manipulation.
