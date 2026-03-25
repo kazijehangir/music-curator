@@ -1,0 +1,4 @@
+## 2024-05-24 - [HIGH] Fix PocketBase Filter Injection
+**Vulnerability:** PocketBase filter string construction (`filter: f"file_path='{file_path_str}'"`) used basic string replacement (`file_path_str.replace("'", "\\'")`) which failed to handle embedded backslashes, leading to filter injection where attackers could escape the string via double-backslashes (e.g. `\'`).
+**Learning:** The PocketBase Python SDK lacks the JS SDK's native parameter binding (`pb.filter()`), requiring completely manual sanitization.
+**Prevention:** Always use the dedicated `sanitize_pb_filter()` utility from `src.core.security` to construct safe filter strings. It must escape backslashes first (`\\` -> `\\\\`) and then single quotes (`'` -> `\\'`).
