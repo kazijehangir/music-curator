@@ -33,7 +33,10 @@ def test_run_discovery_skip_invalid_exts(tmp_path, mocker):
     mock_pb_client = mocker.MagicMock()
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
     
-    # Mock records.items to be empty to simulate new file
+    # Mock get_full_list to be empty to simulate new file
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
+
+    # Mock records for get_list
     mock_records = mocker.MagicMock()
     mock_records.items = []
     mock_pb_client.collection.return_value.get_list.return_value = mock_records
@@ -65,7 +68,10 @@ def test_run_discovery_update_file(tmp_path, mocker):
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
     
     # Mock existing record with a DIFFERENT hash
-    existing_record = mocker.MagicMock(file_hash="old_hash", id="rec_123")
+    existing_record = mocker.MagicMock(file_hash="old_hash", id="rec_123", file_path=str(tmp_path / "downloads" / "unseeded" / "music" / "yubal" / "existing_song.flac"))
+    mock_pb_client.collection.return_value.get_full_list.return_value = [existing_record]
+
+    # Also mock get_list to return the record just in case it's still being called somewhere
     mock_records = mocker.MagicMock()
     mock_records.items = [existing_record]
     mock_pb_client.collection.return_value.get_list.return_value = mock_records
@@ -101,6 +107,9 @@ def test_run_discovery_metadata_timeout_skips_file(tmp_path, mocker):
 
     mock_pb_client = mocker.MagicMock()
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
+
+    # Mock records for get_list
     mock_records = mocker.MagicMock()
     mock_records.items = []
     mock_pb_client.collection.return_value.get_list.return_value = mock_records
@@ -347,3 +356,15 @@ def test_repair_empty_database(mocker):
     assert result["repaired"] == 0
     assert result["errors"] == []
     mock_pb.collection.return_value.update.assert_not_called()
+
+def test_run_discovery_prefetch_fails(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("Database is down")
+
+    result = run_discovery()
+
+    assert result["status"] == "error"
+    assert "Database is down" in result["errors"][0]

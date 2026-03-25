@@ -191,6 +191,24 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
     if ingest_folders is None:
         ingest_folders = [d.strip() for d in settings.ingest_dirs.split(',')]
 
+    print("STATUS: Prefetching existing files from database...")
+    try:
+        all_existing_files = pb.collection('music_file').get_full_list()
+        existing_files_dict = {
+            getattr(record, 'file_path', ''): record
+            for record in all_existing_files
+            if getattr(record, 'file_path', None)
+        }
+        print(f"STATUS: Prefetched {len(existing_files_dict)} files.")
+    except Exception as e:
+        print(f"ERROR: Failed to prefetch existing files: {e}")
+        return {
+            "status": "error",
+            "new_files": 0,
+            "updated_files": 0,
+            "errors": [f"Failed to prefetch existing files: {e}"]
+        }
+
     for dir_name in ingest_folders:
         ingest_path = base_path / dir_name
         if not ingest_path.exists():
