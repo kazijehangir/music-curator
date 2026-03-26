@@ -185,6 +185,22 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
     updated_files_count = 0
     errors = []
     
+    # ⚡ BOLT: Pre-fetch all files to fix N+1 query problem inside the discovery loop
+    # We use get_full_list without the 'fields' param because we need full records for later updates
+    try:
+        all_music_files = pb.collection('music_file').get_full_list()
+        existing_files_dict = {getattr(r, 'file_path', ''): r for r in all_music_files if hasattr(r, 'file_path')}
+        print(f"STATUS: Pre-fetched {len(existing_files_dict)} existing files for fast lookup.")
+    except Exception as e:
+        # BOLT: Fail fast! If we can't fetch existing records, we might insert thousands of duplicates
+        print(f"ERROR: Failed to pre-fetch existing files: {e}")
+        return {
+            "status": "error",
+            "new_files": 0,
+            "updated_files": 0,
+            "errors": [f"Database connection error during pre-fetch: {e}"]
+        }
+
     # Supported audio extensions
     VALID_EXTS = {'.flac', '.opus', '.mp3', '.m4a', '.aac', '.ogg', '.wav'}
 
@@ -210,14 +226,12 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
 
                     # Check if file exists in PocketBase
                     file_path_str = str(filepath)
-                    safe_path_str = file_path_str.replace("'", "\\'")
-                    records = pb.collection('music_file').get_list(
-                        1, 1, {"filter": f"file_path='{safe_path_str}'"}
-                    )
 
-                    if records.items:
+                    # ⚡ BOLT: O(1) dictionary lookup instead of O(N) database queries
+                    existing_record = existing_files_dict.get(file_path_str)
+
+                    if existing_record:
                         # File exists — check if size/mtime changed
-                        existing_record = records.items[0]
                         existing_fp = getattr(existing_record, 'file_hash', None)
                         if existing_fp != file_fingerprint:
                             pb.collection('music_file').update(existing_record.id, {
