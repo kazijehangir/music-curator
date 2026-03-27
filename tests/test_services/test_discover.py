@@ -109,6 +109,21 @@ def test_run_discovery_metadata_timeout_skips_file(tmp_path, mocker):
     # PocketBase create was never called
     mock_pb_client.collection.return_value.create.assert_not_called()
 
+def test_run_discovery_get_full_list_exception(mocker):
+    """If get_full_list throws an exception, run_discovery catches it and fails fast."""
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("DB Connection Refused")
+
+    result = run_discovery()
+
+    assert result["status"] == "error"
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "Failed to fetch existing files" in result["errors"][0]
+    assert "DB Connection Refused" in result["errors"][0]
+
 
 # ── extract_metadata ───────────────────────────────────────────────────────────
 

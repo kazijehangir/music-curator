@@ -193,7 +193,9 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
 
     # Fetch all existing files to avoid N+1 query problem
     try:
-        all_existing_files = pb.collection('music_file').get_full_list()
+        all_existing_files = pb.collection('music_file').get_full_list(
+            query_params={"fields": "id,file_path,file_hash"}
+        )
         existing_files_dict = {
             getattr(f, 'file_path', ''): f for f in all_existing_files
         }
