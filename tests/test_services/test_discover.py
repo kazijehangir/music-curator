@@ -33,10 +33,8 @@ def test_run_discovery_skip_invalid_exts(tmp_path, mocker):
     mock_pb_client = mocker.MagicMock()
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
     
-    # Mock records.items to be empty to simulate new file
-    mock_records = mocker.MagicMock()
-    mock_records.items = []
-    mock_pb_client.collection.return_value.get_list.return_value = mock_records
+    # Mock get_full_list to return empty list to simulate new file
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
 
     result = run_discovery()
 
@@ -66,9 +64,8 @@ def test_run_discovery_update_file(tmp_path, mocker):
     
     # Mock existing record with a DIFFERENT hash
     existing_record = mocker.MagicMock(file_hash="old_hash", id="rec_123")
-    mock_records = mocker.MagicMock()
-    mock_records.items = [existing_record]
-    mock_pb_client.collection.return_value.get_list.return_value = mock_records
+    existing_record.file_path = str(tmp_path / "downloads" / "unseeded" / "music" / "yubal" / "existing_song.flac")
+    mock_pb_client.collection.return_value.get_full_list.return_value = [existing_record]
 
     result = run_discovery()
 
@@ -101,9 +98,7 @@ def test_run_discovery_metadata_timeout_skips_file(tmp_path, mocker):
 
     mock_pb_client = mocker.MagicMock()
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
-    mock_records = mocker.MagicMock()
-    mock_records.items = []
-    mock_pb_client.collection.return_value.get_list.return_value = mock_records
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
 
     result = run_discovery()
 
@@ -113,6 +108,21 @@ def test_run_discovery_metadata_timeout_skips_file(tmp_path, mocker):
     assert "Timed out" in result["errors"][0]
     # PocketBase create was never called
     mock_pb_client.collection.return_value.create.assert_not_called()
+
+def test_run_discovery_get_full_list_exception(mocker):
+    """If get_full_list throws an exception, run_discovery catches it and fails fast."""
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("DB Connection Refused")
+
+    result = run_discovery()
+
+    assert result["status"] == "error"
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "Failed to fetch existing files" in result["errors"][0]
+    assert "DB Connection Refused" in result["errors"][0]
 
 
 # ── extract_metadata ───────────────────────────────────────────────────────────
