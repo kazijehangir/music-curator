@@ -191,6 +191,29 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
     if ingest_folders is None:
         ingest_folders = [d.strip() for d in settings.ingest_dirs.split(',')]
 
+    # 1. Pre-fetch all existing file records for the targeted directories to avoid N+1 queries.
+    # We only need 'id', 'file_path' and 'file_hash' to determine if we should update or create.
+    existing_files = {}
+    try:
+        filter_parts = []
+        for d in ingest_folders:
+            safe_d = d.replace("'", "\\'")
+            filter_parts.append(f"source_dir='{safe_d}'")
+        filter_str = " || ".join(filter_parts)
+
+        records = pb.collection('music_file').get_full_list(
+            query_params={
+                "filter": filter_str,
+                "fields": "id,file_path,file_hash"
+            }
+        )
+        existing_files = {getattr(r, 'file_path'): r for r in records if getattr(r, 'file_path')}
+        print(f"STATUS: Pre-loaded {len(existing_files)} existing file records.")
+    except Exception as e:
+        print(f"DEBUG: Error pre-fetching records: {e}")
+        # We continue with an empty dict; new files will be created and handled by PocketBase's
+        # unique constraints, or processed normally if this was a transient error.
+
     for dir_name in ingest_folders:
         ingest_path = base_path / dir_name
         if not ingest_path.exists():
@@ -208,16 +231,12 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
                     # stat_fingerprint uses os.stat() only — zero file reads, no CIFS blocking.
                     file_fingerprint = stat_fingerprint(filepath)
 
-                    # Check if file exists in PocketBase
+                    # Check if file exists in the pre-fetched cache instead of querying DB
                     file_path_str = str(filepath)
-                    safe_path_str = file_path_str.replace("'", "\\'")
-                    records = pb.collection('music_file').get_list(
-                        1, 1, {"filter": f"file_path='{safe_path_str}'"}
-                    )
+                    existing_record = existing_files.get(file_path_str)
 
-                    if records.items:
+                    if existing_record:
                         # File exists — check if size/mtime changed
-                        existing_record = records.items[0]
                         existing_fp = getattr(existing_record, 'file_hash', None)
                         if existing_fp != file_fingerprint:
                             pb.collection('music_file').update(existing_record.id, {
@@ -246,7 +265,7 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
 
                         raw_combo = f"{raw_title} | {raw_artist} | {raw_album}"
 
-                        pb.collection('music_file').create({
+                        new_record = pb.collection('music_file').create({
                             'source_dir': dir_name,
                             'file_path': file_path_str,
                             'file_hash': file_fingerprint,
@@ -258,6 +277,7 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
                             'duration_seconds': meta['duration_seconds'],
                             'is_primary': False
                         })
+                        existing_files[file_path_str] = new_record
                         new_files_count += 1
 
                 except Exception as e:
