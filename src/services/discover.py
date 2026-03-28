@@ -191,6 +191,19 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
     if ingest_folders is None:
         ingest_folders = [d.strip() for d in settings.ingest_dirs.split(',')]
 
+    # Fetch all existing music_file records in bulk to avoid N+1 queries in the loop
+    existing_files_dict = {}
+    try:
+        all_records = pb.collection('music_file').get_full_list()
+        for record in all_records:
+            file_path_val = getattr(record, 'file_path', None)
+            if file_path_val:
+                existing_files_dict[file_path_val] = record
+    except Exception as e:
+        print(f"DEBUG: Failed to bulk fetch existing records: {e}")
+        # Fail fast instead of falling back to an empty dictionary
+        raise e
+
     for dir_name in ingest_folders:
         ingest_path = base_path / dir_name
         if not ingest_path.exists():
@@ -210,20 +223,18 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
 
                     # Check if file exists in PocketBase
                     file_path_str = str(filepath)
-                    safe_path_str = file_path_str.replace("'", "\\'")
-                    records = pb.collection('music_file').get_list(
-                        1, 1, {"filter": f"file_path='{safe_path_str}'"}
-                    )
 
-                    if records.items:
+                    if file_path_str in existing_files_dict:
                         # File exists — check if size/mtime changed
-                        existing_record = records.items[0]
+                        existing_record = existing_files_dict[file_path_str]
                         existing_fp = getattr(existing_record, 'file_hash', None)
                         if existing_fp != file_fingerprint:
                             pb.collection('music_file').update(existing_record.id, {
                                 'file_hash': file_fingerprint,
                                 'quality_score': None  # Reset so analyze re-runs
                             })
+                            # Update our in-memory cache as well
+                            setattr(existing_record, 'file_hash', file_fingerprint)
                             updated_files_count += 1
                     else:
                         # New file
