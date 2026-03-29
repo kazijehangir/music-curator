@@ -4,8 +4,17 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from src.services.discover import run_discovery, extract_metadata, repair_file_metadata
 from src.core.schema import COLL_FILE, MusicFile
+from src.core.security import sanitize_pb_filter
 
 from src.core.config import settings
+
+def test_sanitize_pb_filter():
+    assert sanitize_pb_filter("normal string") == "normal string"
+    assert sanitize_pb_filter("O'Connor") == "O\\'Connor"
+    assert sanitize_pb_filter("Path\\With\\Slashes") == "Path\\\\With\\\\Slashes"
+    assert sanitize_pb_filter("O'Connor\\Path") == "O\\'Connor\\\\Path"
+    assert sanitize_pb_filter("") == ""
+    assert sanitize_pb_filter(None) is None
 
 def test_run_discovery_skip_invalid_exts(tmp_path, mocker):
     mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
