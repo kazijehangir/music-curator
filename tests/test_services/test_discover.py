@@ -341,3 +341,20 @@ def test_repair_empty_database(mocker):
     assert result["repaired"] == 0
     assert result["errors"] == []
     mock_pb.collection.return_value.update.assert_not_called()
+
+def test_run_discovery_get_full_list_exception(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+
+    # Mock get_full_list to raise an exception
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("Database unavailable")
+
+    result = run_discovery()
+
+    assert result["status"] == "error"
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "Database unavailable" in result["errors"][0]
