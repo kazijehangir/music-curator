@@ -33,10 +33,8 @@ def test_run_discovery_skip_invalid_exts(tmp_path, mocker):
     mock_pb_client = mocker.MagicMock()
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
     
-    # Mock records.items to be empty to simulate new file
-    mock_records = mocker.MagicMock()
-    mock_records.items = []
-    mock_pb_client.collection.return_value.get_list.return_value = mock_records
+    # Mock get_full_list to return empty list to simulate new file
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
 
     result = run_discovery()
 
@@ -65,10 +63,9 @@ def test_run_discovery_update_file(tmp_path, mocker):
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
     
     # Mock existing record with a DIFFERENT hash
-    existing_record = mocker.MagicMock(file_hash="old_hash", id="rec_123")
-    mock_records = mocker.MagicMock()
-    mock_records.items = [existing_record]
-    mock_pb_client.collection.return_value.get_list.return_value = mock_records
+    # The dictionary key uses str(filepath), so we need to set file_path appropriately
+    existing_record = mocker.MagicMock(file_hash="old_hash", id="rec_123", file_path=str(yubal_dir / "existing_song.flac"))
+    mock_pb_client.collection.return_value.get_full_list.return_value = [existing_record]
 
     result = run_discovery()
 
@@ -101,9 +98,7 @@ def test_run_discovery_metadata_timeout_skips_file(tmp_path, mocker):
 
     mock_pb_client = mocker.MagicMock()
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
-    mock_records = mocker.MagicMock()
-    mock_records.items = []
-    mock_pb_client.collection.return_value.get_list.return_value = mock_records
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
 
     result = run_discovery()
 
@@ -131,6 +126,26 @@ def _make_mutagen_mock(info_class_name, tags: dict):
     f.tags.get.side_effect = lambda key, default=None: tags.get(key, default)
     return f
 
+
+def test_run_discovery_fail_fast_on_prefetch_error(tmp_path, mocker):
+    mocker.patch(
+        "src.core.config.settings",
+        ingest_base_path=str(tmp_path),
+        ingest_dirs="downloads",
+        pocketbase_url="http://localhost:8090",
+        pocketbase_admin_email="test@test.com",
+        pocketbase_admin_password="password123",
+    )
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+
+    # Mock get_full_list to raise an Exception
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("DB connection failed")
+
+    import pytest
+    with pytest.raises(Exception, match="DB connection failed"):
+        run_discovery()
 
 def test_extract_metadata_mp4_tags(tmp_path):
     """M4A files use ©nam/©ART/©alb keys — these must be read correctly."""
