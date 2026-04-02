@@ -109,6 +109,23 @@ def test_run_discovery_metadata_timeout_skips_file(tmp_path, mocker):
     mock_pb_client.collection.return_value.create.assert_not_called()
 
 
+def test_run_discovery_prefetch_exception(mocker):
+    """If get_full_list throws an exception during prefetch, it should be caught and return an error."""
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+
+    # Mock prefetch to raise an exception
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("Database unreachable")
+
+    result = run_discovery()
+
+    assert result["status"] == "error"
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "Failed to prefetch existing files: Database unreachable" in result["errors"][0]
+
+
 # ── extract_metadata ───────────────────────────────────────────────────────────
 
 def _make_mutagen_mock(info_class_name, tags: dict):
