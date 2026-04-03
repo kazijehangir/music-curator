@@ -191,6 +191,25 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
     if ingest_folders is None:
         ingest_folders = [d.strip() for d in settings.ingest_dirs.split(',')]
 
+    # Bulk fetch existing files to prevent N+1 queries in the loop
+    existing_files = {}
+    try:
+        all_records = pb.collection('music_file').get_full_list(
+            query_params={"fields": "id,file_path,file_hash"}
+        )
+        for record in all_records:
+            path_val = getattr(record, 'file_path', None)
+            if path_val:
+                existing_files[path_val] = record
+    except Exception as e:
+        errors.append(f"Failed to bulk fetch existing files: {e}")
+        return {
+            "status": "error",
+            "new_files": new_files_count,
+            "updated_files": updated_files_count,
+            "errors": errors
+        }
+
     for dir_name in ingest_folders:
         ingest_path = base_path / dir_name
         if not ingest_path.exists():
@@ -210,14 +229,10 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
 
                     # Check if file exists in PocketBase
                     file_path_str = str(filepath)
-                    safe_path_str = file_path_str.replace("'", "\\'")
-                    records = pb.collection('music_file').get_list(
-                        1, 1, {"filter": f"file_path='{safe_path_str}'"}
-                    )
+                    existing_record = existing_files.get(file_path_str)
 
-                    if records.items:
+                    if existing_record:
                         # File exists — check if size/mtime changed
-                        existing_record = records.items[0]
                         existing_fp = getattr(existing_record, 'file_hash', None)
                         if existing_fp != file_fingerprint:
                             pb.collection('music_file').update(existing_record.id, {
