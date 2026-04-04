@@ -33,10 +33,8 @@ def test_run_discovery_skip_invalid_exts(tmp_path, mocker):
     mock_pb_client = mocker.MagicMock()
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
     
-    # Mock records.items to be empty to simulate new file
-    mock_records = mocker.MagicMock()
-    mock_records.items = []
-    mock_pb_client.collection.return_value.get_list.return_value = mock_records
+    # Mock full_list to return empty list to simulate new file
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
 
     result = run_discovery()
 
@@ -56,7 +54,8 @@ def test_run_discovery_update_file(tmp_path, mocker):
     
     yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
     yubal_dir.mkdir(parents=True)
-    yubal_dir.joinpath("existing_song.flac").touch()
+    file_path = yubal_dir.joinpath("existing_song.flac")
+    file_path.touch()
 
     mocker.patch("src.services.discover.stat_fingerprint", return_value="12345:67890")
     mocker.patch("src.services.discover.extract_metadata", return_value={})
@@ -65,10 +64,8 @@ def test_run_discovery_update_file(tmp_path, mocker):
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
     
     # Mock existing record with a DIFFERENT hash
-    existing_record = mocker.MagicMock(file_hash="old_hash", id="rec_123")
-    mock_records = mocker.MagicMock()
-    mock_records.items = [existing_record]
-    mock_pb_client.collection.return_value.get_list.return_value = mock_records
+    existing_record = mocker.MagicMock(file_hash="old_hash", id="rec_123", file_path=str(file_path))
+    mock_pb_client.collection.return_value.get_full_list.return_value = [existing_record]
 
     result = run_discovery()
 
@@ -101,9 +98,7 @@ def test_run_discovery_metadata_timeout_skips_file(tmp_path, mocker):
 
     mock_pb_client = mocker.MagicMock()
     mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
-    mock_records = mocker.MagicMock()
-    mock_records.items = []
-    mock_pb_client.collection.return_value.get_list.return_value = mock_records
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
 
     result = run_discovery()
 
@@ -113,6 +108,20 @@ def test_run_discovery_metadata_timeout_skips_file(tmp_path, mocker):
     assert "Timed out" in result["errors"][0]
     # PocketBase create was never called
     mock_pb_client.collection.return_value.create.assert_not_called()
+
+
+def test_run_discovery_database_exception_fails_fast(mocker):
+    """Verify that if the bulk database fetch fails, discovery aborts cleanly and logs an error."""
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("Connection refused")
+
+    result = run_discovery(pb=mock_pb_client)
+
+    assert result["status"] == "error"
+    assert "Database connection error" in result["errors"][0]
+    assert result["new_files"] == 0
 
 
 # ── extract_metadata ───────────────────────────────────────────────────────────
