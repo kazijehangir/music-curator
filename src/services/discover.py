@@ -191,6 +191,27 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
     if ingest_folders is None:
         ingest_folders = [d.strip() for d in settings.ingest_dirs.split(',')]
 
+    # ⚡ Bolt Optimization: Bulk pre-fetch all existing file records into memory.
+    # This prevents an N+1 query problem where the DB is queried inside the loop for every single file.
+    existing_records_cache = {}
+    try:
+        all_records = pb.collection('music_file').get_full_list(
+            query_params={"fields": "id,file_path,file_hash"}
+        )
+        for rec in all_records:
+            path = getattr(rec, 'file_path', None)
+            if path:
+                existing_records_cache[path] = rec
+        print(f"STATUS: Pre-fetched {len(existing_records_cache)} existing file records into cache.")
+    except Exception as e:
+        errors.append(f"Failed to pre-fetch existing records: {e}")
+        return {
+            "status": "error",
+            "new_files": new_files_count,
+            "updated_files": updated_files_count,
+            "errors": errors
+        }
+
     for dir_name in ingest_folders:
         ingest_path = base_path / dir_name
         if not ingest_path.exists():
@@ -208,16 +229,13 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
                     # stat_fingerprint uses os.stat() only — zero file reads, no CIFS blocking.
                     file_fingerprint = stat_fingerprint(filepath)
 
-                    # Check if file exists in PocketBase
                     file_path_str = str(filepath)
-                    safe_path_str = file_path_str.replace("'", "\\'")
-                    records = pb.collection('music_file').get_list(
-                        1, 1, {"filter": f"file_path='{safe_path_str}'"}
-                    )
 
-                    if records.items:
+                    # ⚡ Bolt Optimization: O(1) in-memory lookup instead of querying PocketBase
+                    existing_record = existing_records_cache.get(file_path_str)
+
+                    if existing_record:
                         # File exists — check if size/mtime changed
-                        existing_record = records.items[0]
                         existing_fp = getattr(existing_record, 'file_hash', None)
                         if existing_fp != file_fingerprint:
                             pb.collection('music_file').update(existing_record.id, {
