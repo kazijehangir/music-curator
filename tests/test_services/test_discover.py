@@ -341,3 +341,104 @@ def test_repair_empty_database(mocker):
     assert result["repaired"] == 0
     assert result["errors"] == []
     mock_pb.collection.return_value.update.assert_not_called()
+
+def test_run_discovery_prefetch_exception(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("DB offline")
+
+    result = run_discovery()
+
+    assert result["status"] == "error"
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+    assert "Failed to prefetch file records: DB offline" in result["errors"][0]
+
+def test_run_discovery_processing_exception(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("song.flac").touch()
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
+
+    mocker.patch("src.services.discover.stat_fingerprint", side_effect=Exception("stat error"))
+
+    result = run_discovery()
+
+    assert result["status"] == "success"
+    assert result["new_files"] == 0
+    assert result["updated_files"] == 0
+    assert "Error processing" in result["errors"][0]
+
+def test_repair_pb_exception(mocker):
+    mock_pb = MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb)
+    mock_pb.collection.return_value.get_full_list.side_effect = Exception("DB error")
+
+    result = repair_file_metadata()
+    assert len(result["errors"]) == 1
+    assert "Failed to fetch records: DB error" in result["errors"][0]
+
+def test_repair_no_filepath(mocker, tmp_path):
+    record = MagicMock()
+    record.id = "file_no_path"
+    record.file_path = "" # Empty
+
+    mock_pb = _pb_for_repair(mocker, [record])
+    result = repair_file_metadata()
+    assert result["checked"] == 1
+    assert result["repaired"] == 0
+
+def test_repair_timeout_exception(mocker, tmp_path):
+    audio = tmp_path / "track.m4a"
+    audio.write_bytes(b"\x00" * 64)
+
+    record = MagicMock()
+    record.id = "file_mp4"
+    record.file_path = str(audio)
+
+    mock_pb = _pb_for_repair(mocker, [record])
+    mocker.patch(
+        "src.services.discover.extract_metadata",
+        side_effect=concurrent.futures.TimeoutError
+    )
+    result = repair_file_metadata()
+    assert result["repaired"] == 0
+    assert "Timed out" in result["errors"][0]
+
+def test_repair_other_exception(mocker, tmp_path):
+    audio = tmp_path / "track.m4a"
+    audio.write_bytes(b"\x00" * 64)
+
+    record = MagicMock()
+    record.id = "file_mp4"
+    record.file_path = str(audio)
+
+    mock_pb = _pb_for_repair(mocker, [record])
+    mocker.patch(
+        "src.services.discover.extract_metadata",
+        side_effect=Exception("Other error")
+    )
+    result = repair_file_metadata()
+    assert result["repaired"] == 0
+    assert "Metadata error" in result["errors"][0]
+
+def test_extract_metadata_exception(tmp_path, mocker):
+    dummy = tmp_path / "track.flac"
+    dummy.touch()
+
+    # Make mutagen throw an exception to hit lines 103-104
+    mocker.patch("src.services.discover.mutagen.File", side_effect=Exception("mutagen parsing failed"))
+
+    meta = extract_metadata(dummy)
+
+    # Should fall back to safe dictionary and no crash
+    assert meta["codec"] is None
+    assert meta["title"] is None
