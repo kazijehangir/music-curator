@@ -191,6 +191,23 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
     if ingest_folders is None:
         ingest_folders = [d.strip() for d in settings.ingest_dirs.split(',')]
 
+    # Prefetch existing files to avoid N+1 query loop
+    existing_files_cache = {}
+    try:
+        existing_records = pb.collection('music_file').get_full_list(
+            query_params={"fields": "id,file_path,file_hash"}
+        )
+        for record in existing_records:
+            file_path_val = getattr(record, 'file_path', None)
+            if file_path_val:
+                existing_files_cache[file_path_val] = {
+                    "id": record.id,
+                    "file_hash": getattr(record, 'file_hash', None)
+                }
+    except Exception as e:
+        print(f"ERROR: Failed to prefetch existing files: {e}")
+        return {"status": "error", "new_files": 0, "updated_files": 0, "errors": [f"Failed to prefetch existing files: {e}"]}
+
     for dir_name in ingest_folders:
         ingest_path = base_path / dir_name
         if not ingest_path.exists():
@@ -208,22 +225,20 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
                     # stat_fingerprint uses os.stat() only — zero file reads, no CIFS blocking.
                     file_fingerprint = stat_fingerprint(filepath)
 
-                    # Check if file exists in PocketBase
+                    # Check if file exists using prefetched cache
                     file_path_str = str(filepath)
-                    safe_path_str = file_path_str.replace("'", "\\'")
-                    records = pb.collection('music_file').get_list(
-                        1, 1, {"filter": f"file_path='{safe_path_str}'"}
-                    )
+                    cached_record = existing_files_cache.get(file_path_str)
 
-                    if records.items:
+                    if cached_record:
                         # File exists — check if size/mtime changed
-                        existing_record = records.items[0]
-                        existing_fp = getattr(existing_record, 'file_hash', None)
+                        existing_fp = cached_record["file_hash"]
                         if existing_fp != file_fingerprint:
-                            pb.collection('music_file').update(existing_record.id, {
+                            pb.collection('music_file').update(cached_record["id"], {
                                 'file_hash': file_fingerprint,
                                 'quality_score': None  # Reset so analyze re-runs
                             })
+                            # Update cache
+                            cached_record["file_hash"] = file_fingerprint
                             updated_files_count += 1
                     else:
                         # New file
