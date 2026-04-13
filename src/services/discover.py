@@ -191,6 +191,21 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
     if ingest_folders is None:
         ingest_folders = [d.strip() for d in settings.ingest_dirs.split(',')]
 
+    print("STATUS: Prefetching music_file records to avoid N+1 queries...")
+    try:
+        all_records = pb.collection('music_file').get_full_list(
+            query_params={"fields": "id,file_path,file_hash"}
+        )
+        record_cache = {getattr(rec, 'file_path'): rec for rec in all_records if hasattr(rec, 'file_path')}
+    except Exception as e:
+        print(f"ERROR: Failed to prefetch records: {e}")
+        return {
+            "status": "error",
+            "new_files": 0,
+            "updated_files": 0,
+            "errors": [f"Failed to prefetch records: {e}"]
+        }
+
     for dir_name in ingest_folders:
         ingest_path = base_path / dir_name
         if not ingest_path.exists():
@@ -210,14 +225,10 @@ def run_discovery(pb: Optional[PocketBase] = None, ingest_folders: Optional[list
 
                     # Check if file exists in PocketBase
                     file_path_str = str(filepath)
-                    safe_path_str = file_path_str.replace("'", "\\'")
-                    records = pb.collection('music_file').get_list(
-                        1, 1, {"filter": f"file_path='{safe_path_str}'"}
-                    )
+                    existing_record = record_cache.get(file_path_str)
 
-                    if records.items:
+                    if existing_record:
                         # File exists — check if size/mtime changed
-                        existing_record = records.items[0]
                         existing_fp = getattr(existing_record, 'file_hash', None)
                         if existing_fp != file_fingerprint:
                             pb.collection('music_file').update(existing_record.id, {
