@@ -345,3 +345,178 @@ def test_repair_empty_database(mocker):
     assert result["repaired"] == 0
     assert result["errors"] == []
     mock_pb.collection.return_value.update.assert_not_called()
+
+def test_run_discovery_prefetch_exception(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path))
+    mocker.patch("src.services.discover.get_pb_client")
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("DB connection error")
+
+    result = run_discovery()
+
+    assert result["status"] == "error"
+    assert result["new_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "Database error during pre-fetch" in result["errors"][0]
+
+
+def test_run_discovery_extraction_exception(tmp_path, mocker):
+    mocker.patch.object(settings, "ingest_base_path", str(tmp_path / "downloads" / "unseeded" / "music"))
+    yubal_dir = tmp_path / "downloads" / "unseeded" / "music" / "yubal"
+    yubal_dir.mkdir(parents=True)
+    yubal_dir.joinpath("error.flac").touch()
+
+    mocker.patch("src.services.discover.stat_fingerprint", return_value="12345:67890")
+    mocker.patch("src.services.discover.extract_metadata", side_effect=Exception("Extraction error"))
+
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.return_value = []
+
+    result = run_discovery()
+
+    assert result["status"] == "success"
+    assert result["new_files"] == 0
+    assert len(result["errors"]) == 1
+    assert "Error processing" in result["errors"][0]
+
+
+def test_extract_metadata_exception(tmp_path, mocker):
+    dummy = tmp_path / "track.mp3"
+    dummy.touch()
+    mocker.patch("src.services.discover.mutagen.File", side_effect=Exception("mutagen error"))
+
+    meta = extract_metadata(dummy)
+
+    assert meta["codec"] is None
+    assert meta["sample_rate"] is None
+
+
+def test_repair_file_metadata_db_exception(mocker):
+    mock_pb_client = mocker.MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb_client)
+    mock_pb_client.collection.return_value.get_full_list.side_effect = Exception("DB error")
+
+    result = repair_file_metadata()
+    assert len(result["errors"]) == 1
+    assert "Failed to fetch records" in result["errors"][0]
+
+
+def test_repair_file_metadata_timeout_and_exception(mocker, tmp_path):
+    audio1 = tmp_path / "timeout.m4a"
+    audio1.write_bytes(b"\x00" * 64)
+    audio2 = tmp_path / "exception.m4a"
+    audio2.write_bytes(b"\x00" * 64)
+
+    record1 = MagicMock()
+    record1.id = "file_timeout"
+    record1.file_path = str(audio1)
+
+    record2 = MagicMock()
+    record2.id = "file_exception"
+    record2.file_path = str(audio2)
+
+    mock_pb = MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb)
+    mock_pb.collection.return_value.get_full_list.return_value = [record1, record2]
+
+    def side_effect(filepath):
+        if "timeout" in str(filepath):
+            raise concurrent.futures.TimeoutError("timeout")
+        else:
+            raise Exception("error")
+
+    mocker.patch("src.services.discover.extract_metadata", side_effect=side_effect)
+
+    result = repair_file_metadata()
+
+    assert result["repaired"] == 0
+    assert len(result["errors"]) == 2
+    assert any("Timed out" in e for e in result["errors"])
+    assert any("Metadata error" in e for e in result["errors"])
+
+
+def test_extract_metadata_fallback_ext_map(tmp_path, mocker):
+    dummy = tmp_path / "track.wav"
+    dummy.touch()
+
+    mock_f = mocker.MagicMock()
+    mock_f.info = mocker.MagicMock()
+    mock_f.tags = None
+    mock_f.__class__.__name__ = "SomeUnknownFormat"
+
+    mocker.patch("src.services.discover.mutagen.File", return_value=mock_f)
+
+    meta = extract_metadata(dummy)
+    assert meta["codec"] == "wav"
+
+
+def test_get_pb_client(mocker):
+    mocker.patch.object(settings, "pocketbase_url", "http://test")
+    mocker.patch.object(settings, "pocketbase_admin_email", "admin")
+    mocker.patch.object(settings, "pocketbase_admin_password", "pass")
+
+    mock_pb_class = mocker.patch("src.services.discover.PocketBase")
+    mock_instance = mock_pb_class.return_value
+
+    from src.services.discover import get_pb_client
+
+    client = get_pb_client()
+
+    mock_pb_class.assert_called_once_with("http://test")
+    mock_instance.admins.auth_with_password.assert_called_once_with("admin", "pass")
+    assert client == mock_instance
+
+
+def test_stat_fingerprint(tmp_path):
+    file = tmp_path / "test.txt"
+    file.write_text("hello")
+    import os
+    from src.services.discover import stat_fingerprint
+
+    st = os.stat(file)
+    expected = f"{st.st_size}:{st.st_mtime_ns}"
+    assert stat_fingerprint(file) == expected
+
+
+def test_repair_file_metadata_new_combo_equals_empty_combo(mocker, tmp_path):
+    audio = tmp_path / "track.opus"
+    audio.write_bytes(b"\x00" * 64)
+
+    record = MagicMock()
+    record.id = "file_opus"
+    record.file_path = str(audio)
+
+    mock_pb = MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb)
+    mock_pb.collection.return_value.get_full_list.return_value = [record]
+
+    mocker.patch(
+        "src.services.discover.extract_metadata",
+        return_value={"title": None, "artist": None, "album": None, "codec": "opus",
+                      "sample_rate": 48000, "bitrate": 128000,
+                      "bit_depth": None, "duration_seconds": 180.0},
+    )
+
+    result = repair_file_metadata()
+
+    assert result["repaired"] == 0
+    assert len(result["errors"]) == 1
+    assert "Still no metadata after re-extraction" in result["errors"][0]
+
+
+def test_repair_file_metadata_missing_path(mocker):
+    record = MagicMock()
+    record.id = "file_missing_path"
+    record.file_path = "" # Simulate missing path
+
+    mock_pb = MagicMock()
+    mocker.patch("src.services.discover.get_pb_client", return_value=mock_pb)
+    mock_pb.collection.return_value.get_full_list.return_value = [record]
+
+    result = repair_file_metadata()
+
+    assert result["repaired"] == 0
+    assert result["checked"] == 1
+    # no error is appended for this continue
