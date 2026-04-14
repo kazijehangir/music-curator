@@ -255,7 +255,10 @@ def _make_pb_mock(mocker, unanalyzed_records, duplicate_files_items=None):
     )
 
     # get_full_list for unanalyzed files
-    mock_pb.collection.return_value.get_full_list.return_value = unanalyzed_records
+    mock_pb.collection.return_value.get_full_list.side_effect = [
+        unanalyzed_records,
+        [item for item in (duplicate_files_items or [])]
+    ]
 
     # get_list for dedup fingerprint lookup
     dup_mock = MagicMock()
@@ -287,7 +290,7 @@ def test_run_analysis_new_release(mocker, tmp_path):
     # Simulate no siblings yet after grouping
     mock_pb.collection.return_value.get_full_list.side_effect = [
         [record],          # 1st call: unanalyzed files
-        [],                # 2nd call: siblings (empty — just created)
+        [],                # 2nd call: all_files prefetch
     ]
 
     new_release = MagicMock()
@@ -331,9 +334,12 @@ def test_run_analysis_fingerprint_dedup(mocker, tmp_path):
 
     sibling = MagicMock()
     sibling.id = "file002"
+    sibling.acoustid_fp = "fp_shared_001"
+    sibling.release = "relExisting"
+    sibling.quality_score = 100
     mock_pb.collection.return_value.get_full_list.side_effect = [
         [record],    # unanalyzed
-        [sibling],   # siblings for best_file election
+        [sibling],   # all_files prefetch
     ]
 
     result = run_analysis()
@@ -369,9 +375,12 @@ def test_run_analysis_no_duplicate_release_for_already_assigned_file(mocker, tmp
 
     sibling = MagicMock()
     sibling.id = "file004"
+    sibling.acoustid_fp = "fp_unique_xyz"
+    sibling.release = "existing_rel_abc"
+    sibling.quality_score = 100
     mock_pb.collection.return_value.get_full_list.side_effect = [
         [record],    # unanalyzed files
-        [sibling],   # siblings for best_file election
+        [sibling],   # all_files prefetch
     ]
 
     result = run_analysis()
