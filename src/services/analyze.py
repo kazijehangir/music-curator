@@ -289,6 +289,9 @@ def run_analysis(pb: Optional[Any] = None) -> Dict[str, Any]:
         unanalyzed_records = pb.collection('music_file').get_full_list(
             query_params={"filter": "acoustid_fp='' || acoustid_fp=null || acoustid_fp='FAILED'"}
         )
+        all_files = pb.collection(COLL_FILE).get_full_list(
+            query_params={"fields": "id,acoustid_fp,release,quality_score,is_primary"}
+        )
     except Exception as e:
         logger.error(f"Failed to fetch unanalyzed files from pb: {e}")
         stats["errors"].append(str(e))
@@ -296,6 +299,16 @@ def run_analysis(pb: Optional[Any] = None) -> Dict[str, Any]:
 
     total = len(unanalyzed_records)
     print(f"STATUS: Found {total} files needing analysis.")
+
+    fp_to_release = {}
+    release_to_files = {}
+    for f in all_files:
+        fp_val = getattr(f, MusicFile.ACOUSTID_FP, None)
+        rel_val = getattr(f, MusicFile.RELEASE, None)
+        if fp_val and rel_val:
+            fp_to_release[fp_val] = rel_val
+        if rel_val:
+            release_to_files.setdefault(rel_val, []).append(f)
 
     for i, record in enumerate(unanalyzed_records):
         file_path_str = getattr(record, 'file_path', None)
@@ -333,18 +346,13 @@ def run_analysis(pb: Optional[Any] = None) -> Dict[str, Any]:
                 continue # Cannot deduplicate without footprint
                 
             # 3. Deduplication Logic
-            duplicate_files = pb.collection(COLL_FILE).get_list(
-                1, 2, {"filter": f"{MusicFile.ACOUSTID_FP}='{fp}' && id!='{record.id}'"}
-            )
-
             # Preserve existing release assignment — re-analyzing a file (e.g.
             # after a FAILED fingerprint) must not create a duplicate release.
             target_release_id = getattr(record, MusicFile.RELEASE, None) or None
 
-            if duplicate_files.items:
+            if not target_release_id and fp in fp_to_release:
                 # We have a match! Attach to existing release
-                existing_match = duplicate_files.items[0]
-                target_release_id = getattr(existing_match, 'release', None)
+                target_release_id = fp_to_release[fp]
                 if target_release_id:
                     stats["merged_files"] += 1
                     
@@ -374,11 +382,23 @@ def run_analysis(pb: Optional[Any] = None) -> Dict[str, Any]:
             # Tie this file to the release parent
             pb.collection(COLL_FILE).update(record.id, {MusicFile.RELEASE: target_release_id})
             
-            # 4. Primary Election (Ranking)
-            # Fetch all files tied to this release, sort by quality score descending
-            siblings = pb.collection(COLL_FILE).get_full_list(
-                query_params={"filter": f"{MusicFile.RELEASE}='{target_release_id}'", "sort": f"-{MusicFile.QUALITY_SCORE}"}
+            fp_to_release[fp] = target_release_id
+
+            import types
+            record_copy = types.SimpleNamespace(
+                id=record.id,
+                release=target_release_id,
+                acoustid_fp=fp,
+                quality_score=score,
+                is_primary=getattr(record, MusicFile.IS_PRIMARY, False)
             )
+            if target_release_id not in release_to_files:
+                release_to_files[target_release_id] = []
+            release_to_files[target_release_id] = [r for r in release_to_files[target_release_id] if r.id != record.id]
+            release_to_files[target_release_id].append(record_copy)
+
+            # 4. Primary Election (Ranking)
+            siblings = sorted(release_to_files.get(target_release_id, []), key=lambda x: getattr(x, 'quality_score', 0) or 0, reverse=True)
 
             if siblings:
                 best_file_id = siblings[0].id
@@ -393,6 +413,7 @@ def run_analysis(pb: Optional[Any] = None) -> Dict[str, Any]:
                     curr_p = getattr(sib, 'is_primary', False)
                     if curr_p != is_p:
                         pb.collection('music_file').update(sib.id, {'is_primary': is_p})
+                        sib.is_primary = is_p
                         
         except Exception as e:
             logger.error(f"Error analyzing {file_path_str}: {e}")
