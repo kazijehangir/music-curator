@@ -62,10 +62,25 @@ def run_tagging(pb: Optional[Any] = None) -> Dict[str, Any]:
         stats["errors"].append(str(e))
         return stats
         
+    try:
+        all_files = pb.collection(COLL_FILE).get_full_list()
+        files_by_release = {}
+        for f in all_files:
+            rel_id = getattr(f, MusicFile.RELEASE, None)
+            if rel_id:
+                if rel_id not in files_by_release:
+                    files_by_release[rel_id] = []
+                files_by_release[rel_id].append(f)
+    except Exception as e:
+        logger.error(f"Failed to prefetch files for tagging: {e}")
+        stats["errors"].append(str(e))
+        return stats
+
     for idx, r in enumerate(releases):
         print(f"STATUS: Tagging release {r.id} ({idx+1}/{len(releases)})")
         try:
-            success = process_release(pb, r, stats)
+            release_files = files_by_release.get(r.id, [])
+            success = process_release(pb, r, release_files, stats)
             if success:
                 stats["tagged"] += 1
         except Exception as e:
@@ -76,11 +91,7 @@ def run_tagging(pb: Optional[Any] = None) -> Dict[str, Any]:
     print(f"STATUS: Tagging complete. Processed {stats['tagged']} releases.")
     return stats
 
-def process_release(pb, release, stats: Dict[str, Any]) -> bool:
-    # Get all files for this release
-    files = pb.collection(COLL_FILE).get_full_list(
-        query_params={"filter": f"{MusicFile.RELEASE}='{release.id}'"}
-    )
+def process_release(pb, release, files: List[Any], stats: Dict[str, Any]) -> bool:
     if not files:
         return False
 
