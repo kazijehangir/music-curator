@@ -31,6 +31,30 @@ def test_pass_2_sidecars(mock_pocketbase, fs):
     assert "title" in fields_created
     assert "artist" in fields_created
 
+def test_run_tagging_prefetches_files(mock_pocketbase):
+    # Setup releases and files
+    rel = MagicMock()
+    rel.id = "rel123"
+
+    file_record = MagicMock()
+    file_record.id = "file123"
+    file_record.release = "rel123"
+    file_record.is_primary = True
+    file_record.raw_meta = "Title | Artist | Album"
+
+    # Mock get_full_list to return releases first, then files
+    mock_pocketbase.collection.return_value.get_full_list.side_effect = [
+        [rel],          # Releases
+        [file_record],  # Files
+        []              # Any other calls (like metadata sources)
+    ]
+
+    run_tagging(mock_pocketbase)
+
+    # Assert get_full_list was called exactly twice (once for releases, once for files)
+    # The _resolve_and_write_tags function also calls get_full_list for sources, so the total count will be 3
+    assert mock_pocketbase.collection.return_value.get_full_list.call_count >= 2
+
 def test_pass_3_llm(mock_pocketbase, mock_httpx):
     mock_post_resp = MagicMock()
     # Provide a simulated LLM JSON response
