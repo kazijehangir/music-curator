@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import json
-from src.services.tagging import _pass_2_sidecars, _pass_3_llm, run_tagging, process_release
+from src.services.tagging import _pass_1_beets, _pass_2_sidecars, _pass_3_llm, run_tagging, process_release
 
 @pytest.fixture
 def mock_httpx():
@@ -53,3 +53,27 @@ def test_pass_3_llm(mock_pocketbase, mock_httpx):
     # Called for 4 fields (title, artist, genre, language - album is null)
     assert mock_pocketbase.collection.return_value.create.call_count == 4
     assert stats["llm_processed"] == 1
+
+def test_pass_1_beets_command_injection_prevention(mocker):
+    # Mock subprocess.run to verify arguments
+    mock_run = mocker.patch("src.services.tagging.subprocess.run")
+    # Mock mutagen.File so it doesn't try to actually open the file
+    mocker.patch("src.services.tagging.mutagen.File", return_value=None)
+
+    file_record = MagicMock()
+    # Create a malicious filename that looks like a flag
+    file_record.file_path = "-s malicious_payload"
+
+    _pass_1_beets(file_record)
+
+    # Verify subprocess.run was called
+    mock_run.assert_called_once()
+
+    # Get the command list that was passed to subprocess.run
+    cmd_args = mock_run.call_args[0][0]
+
+    # Verify '--' is used before the file path to prevent argument injection
+    assert "--" in cmd_args
+    dash_dash_index = cmd_args.index("--")
+    # Ensure the file path is immediately after the '--' separator
+    assert cmd_args[dash_dash_index + 1] == "-s malicious_payload"
