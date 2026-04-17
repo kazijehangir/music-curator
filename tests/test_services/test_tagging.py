@@ -53,3 +53,30 @@ def test_pass_3_llm(mock_pocketbase, mock_httpx):
     # Called for 4 fields (title, artist, genre, language - album is null)
     assert mock_pocketbase.collection.return_value.create.call_count == 4
     assert stats["llm_processed"] == 1
+
+def test_pass_1_beets(mock_pocketbase, mocker, fs):
+    from src.services.tagging import _pass_1_beets
+
+    fs.create_file("/test/-song.flac", contents="binary data")
+
+    file_record = MagicMock()
+    file_record.id = "file123"
+    file_record.file_path = "/test/-song.flac"
+
+    mock_run = mocker.patch("src.services.tagging.subprocess.run")
+    mock_mutagen = mocker.patch("src.services.tagging.mutagen.File")
+
+    # Simulate mutagen finding a tag
+    mock_f = MagicMock()
+    mock_f.__contains__.return_value = True
+    mock_f.__getitem__.return_value = ["mbid-1234"]
+    mock_mutagen.return_value = mock_f
+
+    mbid = _pass_1_beets(file_record)
+
+    assert mbid == "mbid-1234"
+    mock_run.assert_called_once()
+
+    # Assert that '--' was passed before the file path
+    cmd_args = mock_run.call_args[0][0]
+    assert cmd_args[-2:] == ["--", "/test/-song.flac"]
