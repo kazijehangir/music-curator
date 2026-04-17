@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # Internal Paths
     nas_mount_path: str
     ingest_base_path: str
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     ingest_dirs: str = "yubal,tidal-dl,adhoc" # Keep as comma separated string for env inject
     media_library_path: str
     
