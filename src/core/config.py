@@ -1,3 +1,5 @@
+from typing import List, Union
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -6,8 +8,18 @@ class Settings(BaseSettings):
     
     # Internal APIs
     pocketbase_url: str = "http://127.0.0.1:8090" # Used as default if internal env not supplied
+    cors_origins: Union[str, List[str]] = ["http://localhost:8090", "http://127.0.0.1:8090"]
     pocketbase_admin_email: str
     pocketbase_admin_password: str
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[str, List[str]]:
+        if isinstance(v, str) and not v.startswith("["):
+            return [i.strip() for i in v.split(",")]
+        elif isinstance(v, (list, str)):
+            return v
+        raise ValueError(v)
     
     # External APIs
     lm_studio_url: str = "http://localhost:1234/v1" # Overridden by LM_STUDIO_URL env var
