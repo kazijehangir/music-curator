@@ -61,11 +61,38 @@ def run_tagging(pb: Optional[Any] = None) -> Dict[str, Any]:
         logger.error(f"Failed to fetch releases for tagging: {e}")
         stats["errors"].append(str(e))
         return stats
+
+    print("STATUS: Prefetching files for releases...")
+    try:
+        # Pre-fetch only the files that belong to the releases we are about to tag
+        release_ids = [r.id for r in releases]
+        files_by_release = {}
+
+        # Chunk the prefetch to avoid hitting URI length or SQLITE_MAX_EXPR_DEPTH limits
+        chunk_size = 100
+        for i in range(0, len(release_ids), chunk_size):
+            chunk = release_ids[i:i + chunk_size]
+            filter_str = " || ".join([f"{MusicFile.RELEASE}='{rid}'" for rid in chunk])
+
+            if filter_str:
+                chunk_files = pb.collection(COLL_FILE).get_full_list(
+                    query_params={"filter": filter_str}
+                )
+                for f in chunk_files:
+                    rel_id = getattr(f, MusicFile.RELEASE, None)
+                    if rel_id:
+                        if rel_id not in files_by_release:
+                            files_by_release[rel_id] = []
+                        files_by_release[rel_id].append(f)
+    except Exception as e:
+        logger.error(f"Failed to prefetch files: {e}")
+        stats["errors"].append(f"Failed to prefetch files: {e}")
+        return stats
         
     for idx, r in enumerate(releases):
         print(f"STATUS: Tagging release {r.id} ({idx+1}/{len(releases)})")
         try:
-            success = process_release(pb, r, stats)
+            success = process_release(pb, r, files_by_release.get(r.id, []), stats)
             if success:
                 stats["tagged"] += 1
         except Exception as e:
@@ -76,11 +103,7 @@ def run_tagging(pb: Optional[Any] = None) -> Dict[str, Any]:
     print(f"STATUS: Tagging complete. Processed {stats['tagged']} releases.")
     return stats
 
-def process_release(pb, release, stats: Dict[str, Any]) -> bool:
-    # Get all files for this release
-    files = pb.collection(COLL_FILE).get_full_list(
-        query_params={"filter": f"{MusicFile.RELEASE}='{release.id}'"}
-    )
+def process_release(pb, release, files, stats: Dict[str, Any]) -> bool:
     if not files:
         return False
 
