@@ -28,6 +28,7 @@ This file tracks the implementation progress of the Music Curator pipeline based
 * [x] **Mutagen Gap-Fill**: Read from sidecars (`.info.json`).
 * [x] **LLM Normalization**: Send raw metadata to LMStudio for transliteration, parsing, genre inference.
 * [x] **Connect `/api/tag`**.
+* [x] **Security Hardening**: Prevent command argument injection in `beet import` subprocess calls.
 
 ## Phase 5: MusicBrainz Contribution (Days 27–32)
 
