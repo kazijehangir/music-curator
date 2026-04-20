@@ -1,12 +1,30 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import json
-from src.services.tagging import _pass_2_sidecars, _pass_3_llm, run_tagging, process_release
+from src.services.tagging import _pass_1_beets, _pass_2_sidecars, _pass_3_llm, run_tagging, process_release
+import sys
+from pathlib import Path
 
 @pytest.fixture
 def mock_httpx():
     with patch("src.services.tagging.httpx.post") as mock_post:
         yield mock_post
+
+def test_pass_1_beets_command_injection():
+    # Verify that the -- argument separator is used to prevent path injection
+    file_record = MagicMock()
+    file_record.file_path = "-v"  # A path that looks like a flag
+
+    with patch("src.services.tagging.subprocess.run") as mock_run, \
+         patch("src.services.tagging.mutagen.File") as mock_mutagen:
+        mock_mutagen.return_value = None
+        _pass_1_beets(file_record)
+
+        mock_run.assert_called_once()
+        cmd_args = mock_run.call_args[0][0]
+
+        beet_bin = str(Path(sys.executable).parent / "beet")
+        assert cmd_args == [beet_bin, "import", "-q", "-C", "-s", "--", "-v"]
 
 def test_pass_2_sidecars(mock_pocketbase, fs):
     # Setup realistic file structure
