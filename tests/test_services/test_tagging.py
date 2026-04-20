@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import json
-from src.services.tagging import _pass_2_sidecars, _pass_3_llm, run_tagging, process_release
+from src.services.tagging import _pass_1_beets, _pass_2_sidecars, _pass_3_llm, run_tagging, process_release
 
 @pytest.fixture
 def mock_httpx():
@@ -53,3 +53,21 @@ def test_pass_3_llm(mock_pocketbase, mock_httpx):
     # Called for 4 fields (title, artist, genre, language - album is null)
     assert mock_pocketbase.collection.return_value.create.call_count == 4
     assert stats["llm_processed"] == 1
+
+def test_pass_1_beets_secure_subprocess(mocker):
+    # Setup mock file record
+    primary_file = MagicMock()
+    primary_file.file_path = "-invalid_arg.opus"
+
+    # Mock subprocess.run and mutagen.File
+    mock_run = mocker.patch("src.services.tagging.subprocess.run")
+    mock_mutagen = mocker.patch("src.services.tagging.mutagen.File")
+    mock_mutagen.return_value = None
+
+    _pass_1_beets(primary_file)
+
+    # Verify subprocess.run was called with '--' separator to prevent argument injection
+    assert mock_run.call_count == 1
+    cmd_args = mock_run.call_args[0][0]
+    assert "--" in cmd_args
+    assert cmd_args[cmd_args.index("--") + 1] == "-invalid_arg.opus"
