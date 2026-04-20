@@ -115,6 +115,7 @@ The n8n workflow requires the following environment variable to be set:
 The Python service uses Pydantic Settings and can be configured via a `.env` file or environment variables:
 - `LM_STUDIO_URL`: (Optional) URL for the LLM metadata normalization service.
 - `POCKETBASE_URL`: (Optional) URL for the PocketBase instance.
+- `CORS_ORIGINS`: (Optional) Comma-separated list of allowed origins. Defaults to local origins.
 - See `src/core/config.py` for other available settings.
 
 ## Observability & Debugging
