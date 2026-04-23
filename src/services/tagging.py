@@ -63,7 +63,7 @@ def run_tagging(pb: Optional[Any] = None) -> Dict[str, Any]:
         return stats
         
     print("STATUS: Prefetching files to avoid N+1 queries...")
-    files_by_release = {}
+    files_by_release: Dict[str, List[Any]] = {r.id: [] for r in releases}
     chunk_size = 50
     for i in range(0, len(releases), chunk_size):
         chunk = releases[i:i+chunk_size]
