@@ -62,10 +62,28 @@ def run_tagging(pb: Optional[Any] = None) -> Dict[str, Any]:
         stats["errors"].append(str(e))
         return stats
         
+    print("STATUS: Prefetching files to avoid N+1 queries...")
+    files_by_release = {}
+    chunk_size = 50
+    for i in range(0, len(releases), chunk_size):
+        chunk = releases[i:i+chunk_size]
+        filter_str = " || ".join(f"{MusicFile.RELEASE}='{r.id}'" for r in chunk)
+        if filter_str:
+            try:
+                chunk_files = pb.collection(COLL_FILE).get_full_list(
+                    query_params={"filter": filter_str}
+                )
+                for f in chunk_files:
+                    rel_id = getattr(f, MusicFile.RELEASE, None)
+                    if rel_id:
+                        files_by_release.setdefault(rel_id, []).append(f)
+            except Exception as e:
+                logger.error(f"Failed to prefetch files chunk: {e}")
+
     for idx, r in enumerate(releases):
         print(f"STATUS: Tagging release {r.id} ({idx+1}/{len(releases)})")
         try:
-            success = process_release(pb, r, stats)
+            success = process_release(pb, r, stats, prefetched_files=files_by_release.get(r.id))
             if success:
                 stats["tagged"] += 1
         except Exception as e:
@@ -76,11 +94,14 @@ def run_tagging(pb: Optional[Any] = None) -> Dict[str, Any]:
     print(f"STATUS: Tagging complete. Processed {stats['tagged']} releases.")
     return stats
 
-def process_release(pb, release, stats: Dict[str, Any]) -> bool:
+def process_release(pb, release, stats: Dict[str, Any], prefetched_files: Optional[List[Any]] = None) -> bool:
     # Get all files for this release
-    files = pb.collection(COLL_FILE).get_full_list(
-        query_params={"filter": f"{MusicFile.RELEASE}='{release.id}'"}
-    )
+    if prefetched_files is not None:
+        files = prefetched_files
+    else:
+        files = pb.collection(COLL_FILE).get_full_list(
+            query_params={"filter": f"{MusicFile.RELEASE}='{release.id}'"}
+        )
     if not files:
         return False
 
