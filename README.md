@@ -95,6 +95,9 @@ scripts/          # Setup and deployment scripts
 2. Run the application: `uvicorn src.api.main:app --reload`
 3. Visit the auto-generated docs at `http://127.0.0.1:8000/docs`
 
+## Security
+CORS is strictly configured to internal PocketBase URLs by default, using `settings.cors_origins`.
+
 ## Existing Core Endpoints
 - `POST /api/discover`: Scans ingest directories for new files.
 - `POST /api/analyze`: Generates AcoustID and Quality scores.
