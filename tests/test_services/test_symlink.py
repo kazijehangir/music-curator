@@ -105,13 +105,7 @@ def test_target_path_unknown_codec_falls_back_to_file_ext(tmp_path):
 # ── run_symlink helpers ────────────────────────────────────────────────────────
 
 def _make_pb_mock(mocker, releases, primary_files, stale_files=None, library_path='/fake/library'):
-    """Returns a configured mock PocketBase client.
-
-    get_full_list side_effect order mirrors run_symlink() call order:
-      1. all releases (COLL_RELEASE)
-      2. is_primary=true files (COLL_FILE)
-      3. is_primary=false && symlink_path!='' files (COLL_FILE)
-    """
+    """Returns a configured mock PocketBase client."""
     mock_pb = MagicMock()
     mocker.patch("src.services.symlink.get_pb_client", return_value=mock_pb)
     mocker.patch(
@@ -119,11 +113,14 @@ def _make_pb_mock(mocker, releases, primary_files, stale_files=None, library_pat
         media_library_path=library_path,
     )
 
-    mock_pb.collection.return_value.get_full_list.side_effect = [
-        releases,
-        primary_files,
-        stale_files if stale_files is not None else [],
-    ]
+    def mock_get_full_list(query_params=None, **kwargs):
+        if query_params is None: query_params = {}
+        filter_str = query_params.get('filter', '')
+        if 'is_primary=true' in filter_str: return primary_files
+        if 'is_primary=false' in filter_str: return stale_files if stale_files is not None else []
+        return releases
+
+    mock_pb.collection.return_value.get_full_list.side_effect = mock_get_full_list
     return mock_pb
 
 
