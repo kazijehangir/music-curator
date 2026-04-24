@@ -37,5 +37,6 @@ This file tracks the implementation progress of the Music Curator pipeline based
 
 ## Phase 6: Polish (Days 33–35)
 
+* [x] **Security Fixes**: Fix overly permissive CORS configuration.
 * [ ] **Realtime Hooks**: PocketBase editing triggers.
 * [ ] **Health endpoint (`/api/health`)**.
