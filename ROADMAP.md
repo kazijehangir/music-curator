@@ -39,3 +39,7 @@ This file tracks the implementation progress of the Music Curator pipeline based
 
 * [ ] **Realtime Hooks**: PocketBase editing triggers.
 * [ ] **Health endpoint (`/api/health`)**.
+
+## Phase 7: Maintenance & Code Health (Ongoing)
+
+* [x] **Secure CORS**: Fixed overly permissive CORS configuration.

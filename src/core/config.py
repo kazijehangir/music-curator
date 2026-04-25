@@ -1,3 +1,5 @@
+from typing import Union, List, Any
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -13,6 +15,15 @@ class Settings(BaseSettings):
     lm_studio_url: str = "http://localhost:1234/v1" # Overridden by LM_STUDIO_URL env var
     llm_model_name: str = "openai/gpt-oss-20b"
     
+    cors_origins: Union[str, List[str]] = ["http://localhost:8090", "http://127.0.0.1:8090"]
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: Any) -> Union[str, List[str]]:
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
+
     # Internal Paths
     nas_mount_path: str
     ingest_base_path: str
