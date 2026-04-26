@@ -172,7 +172,9 @@ def reanalyze_quality() -> Dict[str, Any]:
     pb = get_pb_client()
     stats = {"processed": 0, "errors": []}
 
-    all_files = pb.collection(COLL_FILE).get_full_list()
+    all_files = pb.collection(COLL_FILE).get_full_list(
+        query_params={"fields": f"id,{MusicFile.FILE_PATH}"}
+    )
     total = len(all_files)
     print(f"STATUS: Re-scoring quality for {total} files.")
 
