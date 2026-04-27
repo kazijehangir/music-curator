@@ -122,7 +122,10 @@ def repair_file_metadata() -> Dict[str, Any]:
     EMPTY_COMBO = " |  | "
     try:
         records = pb.collection(COLL_FILE).get_full_list(
-            query_params={"filter": f"{MusicFile.RAW_META}='{EMPTY_COMBO}'"}
+            query_params={
+                "filter": f"{MusicFile.RAW_META}='{EMPTY_COMBO}'",
+                "fields": f"id,{MusicFile.FILE_PATH}"
+            }
         )
     except Exception as e:
         stats["errors"].append(f"Failed to fetch records: {e}")
