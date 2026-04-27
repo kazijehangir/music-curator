@@ -20,3 +20,8 @@ def test_discover_streams_text(client, mocker):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
     assert "finished with code" in response.text
+
+def test_cors_rejects_disallowed_origin(client):
+    response = client.get("/api/health", headers={"Origin": "http://evil.com"})
+    assert response.status_code == 200
+    assert "access-control-allow-origin" not in response.headers
