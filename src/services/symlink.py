@@ -51,12 +51,17 @@ def run_symlink() -> Dict[str, Any]:
     }
 
     # 1. Load all releases into a lookup dict (single bulk query)
-    all_releases = pb.collection(COLL_RELEASE).get_full_list()
+    all_releases = pb.collection(COLL_RELEASE).get_full_list(
+        query_params={"fields": f"id,{Release.TITLE},{Release.ARTIST},{Release.ALBUM}"}
+    )
     releases_by_id = {r.id: r for r in all_releases}
 
     # 2. Fetch all primary files
     primary_files = pb.collection(COLL_FILE).get_full_list(
-        query_params={"filter": f"{MusicFile.IS_PRIMARY}=true"}
+        query_params={
+            "filter": f"{MusicFile.IS_PRIMARY}=true",
+            "fields": f"id,{MusicFile.FILE_PATH},{MusicFile.RELEASE},{MusicFile.CODEC},{MusicFile.SYMLINK_PATH}"
+        }
     )
 
     print(f"STATUS: Processing {len(primary_files)} primary files.")
@@ -121,7 +126,10 @@ def run_symlink() -> Dict[str, Any]:
 
     # 4. Clean stale symlinks on non-primary files
     stale_files = pb.collection(COLL_FILE).get_full_list(
-        query_params={"filter": f"{MusicFile.IS_PRIMARY}=false && {MusicFile.SYMLINK_PATH}!=''"}
+        query_params={
+            "filter": f"{MusicFile.IS_PRIMARY}=false && {MusicFile.SYMLINK_PATH}!=''",
+            "fields": f"id,{MusicFile.SYMLINK_PATH}"
+        }
     )
 
     for file_record in stale_files:
