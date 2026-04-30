@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     
     cors_origins: Union[str, List[str]] = ["http://localhost:8090", "http://127.0.0.1:8090"]
 
+    @field_validator("cors_origins", mode="before")
     @classmethod
-    @field_validator("cors_origins")
     def parse_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
         if isinstance(v, str):
             return [i.strip() for i in v.split(",") if i.strip()]
