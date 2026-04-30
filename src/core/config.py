@@ -1,4 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
+from typing import Union, List
 
 class Settings(BaseSettings):
     project_name: str = "Music Curator API"
@@ -19,6 +21,15 @@ class Settings(BaseSettings):
     ingest_dirs: str = "yubal,tidal-dl,adhoc" # Keep as comma separated string for env inject
     media_library_path: str
     
+    cors_origins: Union[str, List[str]] = ["http://localhost:8090", "http://127.0.0.1:8090"]
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
+        if isinstance(v, str):
+            return [i.strip() for i in v.split(",") if i.strip()]
+        return v
+
     model_config = SettingsConfigDict(
         env_file=".env", 
         env_file_encoding="utf-8",
