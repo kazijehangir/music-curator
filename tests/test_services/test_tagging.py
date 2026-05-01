@@ -31,6 +31,20 @@ def test_pass_2_sidecars(mock_pocketbase, fs):
     assert "title" in fields_created
     assert "artist" in fields_created
 
+def test_run_tagging(mock_pocketbase):
+    # Setup mock to return a chunk of 2 releases
+    mock_pb_client = mock_pocketbase
+    mock_pb_client.collection.return_value.get_full_list.side_effect = [
+        [MagicMock(id="rel1"), MagicMock(id="rel2")], # releases
+        [MagicMock(id="file1", release="rel1"), MagicMock(id="file2", release="rel2")] # chunk files
+    ]
+
+    with patch("src.services.tagging.process_release") as mock_process_release:
+        mock_process_release.return_value = True
+        stats = run_tagging(mock_pb_client)
+        assert stats["tagged"] == 2
+        assert mock_process_release.call_count == 2
+
 def test_pass_3_llm(mock_pocketbase, mock_httpx):
     mock_post_resp = MagicMock()
     # Provide a simulated LLM JSON response

@@ -62,25 +62,54 @@ def run_tagging(pb: Optional[Any] = None) -> Dict[str, Any]:
         stats["errors"].append(str(e))
         return stats
         
-    for idx, r in enumerate(releases):
-        print(f"STATUS: Tagging release {r.id} ({idx+1}/{len(releases)})")
+    # OPTIMIZATION: Chunk releases to prefetch music_file records, avoiding N+1 queries.
+    chunk_size = 50
+    for i in range(0, len(releases), chunk_size):
+        chunk = releases[i:i + chunk_size]
+
+        # Prefetch files for this chunk dynamically using || filter
+        filter_str = " || ".join(f"{MusicFile.RELEASE}='{r.id}'" for r in chunk)
         try:
-            success = process_release(pb, r, stats)
-            if success:
-                stats["tagged"] += 1
+            chunk_files = pb.collection(COLL_FILE).get_full_list(
+                query_params={"filter": filter_str}
+            )
         except Exception as e:
-            msg = f"Error tagging release {r.id}: {e}"
-            logger.error(msg)
-            stats["errors"].append(msg)
+            logger.error(f"Failed to prefetch files for chunk: {e}")
+            stats["errors"].append(f"Failed to prefetch files: {e}")
+            continue
+
+        # Group files by release ID in-memory
+        files_by_release = {}
+        for f in chunk_files:
+            rel_id = getattr(f, MusicFile.RELEASE, None)
+            if rel_id:
+                files_by_release.setdefault(rel_id, []).append(f)
+
+        for j, r in enumerate(chunk):
+            idx = i + j
+            print(f"STATUS: Tagging release {r.id} ({idx+1}/{len(releases)})")
+            try:
+                release_files = files_by_release.get(r.id, [])
+                success = process_release(pb, r, stats, release_files)
+                if success:
+                    stats["tagged"] += 1
+            except Exception as e:
+                msg = f"Error tagging release {r.id}: {e}"
+                logger.error(msg)
+                stats["errors"].append(msg)
             
     print(f"STATUS: Tagging complete. Processed {stats['tagged']} releases.")
     return stats
 
-def process_release(pb, release, stats: Dict[str, Any]) -> bool:
+def process_release(pb, release, stats: Dict[str, Any], pre_fetched_files: Optional[List[Any]] = None) -> bool:
     # Get all files for this release
-    files = pb.collection(COLL_FILE).get_full_list(
-        query_params={"filter": f"{MusicFile.RELEASE}='{release.id}'"}
-    )
+    if pre_fetched_files is not None:
+        files = pre_fetched_files
+    else:
+        files = pb.collection(COLL_FILE).get_full_list(
+            query_params={"filter": f"{MusicFile.RELEASE}='{release.id}'"}
+        )
+
     if not files:
         return False
 
