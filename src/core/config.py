@@ -1,6 +1,16 @@
+from typing import Union, List
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
+    cors_origins: Union[str, List[str]] = ["http://localhost:8090", "http://127.0.0.1:8090"]
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: Union[str, List[str]]) -> Union[str, List[str]]:
+        if isinstance(v, str) and not v.startswith("["):
+            return [i.strip() for i in v.split(",") if i.strip()]
+        return v
     project_name: str = "Music Curator API"
     version: str = "3.0.0"
     
