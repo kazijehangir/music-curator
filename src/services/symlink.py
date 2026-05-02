@@ -51,12 +51,21 @@ def run_symlink() -> Dict[str, Any]:
     }
 
     # 1. Load all releases into a lookup dict (single bulk query)
-    all_releases = pb.collection(COLL_RELEASE).get_full_list()
+    # Bolt: Fetch only the fields needed for path generation to reduce memory and payload size
+    fields_rel = f"id,{Release.ARTIST},{Release.TITLE},{Release.ALBUM}"
+    all_releases = pb.collection(COLL_RELEASE).get_full_list(
+        query_params={"fields": fields_rel}
+    )
     releases_by_id = {r.id: r for r in all_releases}
 
     # 2. Fetch all primary files
+    # Bolt: Fetch only the fields needed for path generation to reduce memory and payload size
+    fields_file = f"id,{MusicFile.FILE_PATH},{MusicFile.RELEASE},{MusicFile.SYMLINK_PATH},{MusicFile.CODEC}"
     primary_files = pb.collection(COLL_FILE).get_full_list(
-        query_params={"filter": f"{MusicFile.IS_PRIMARY}=true"}
+        query_params={
+            "filter": f"{MusicFile.IS_PRIMARY}=true",
+            "fields": fields_file
+        }
     )
 
     print(f"STATUS: Processing {len(primary_files)} primary files.")
@@ -120,8 +129,12 @@ def run_symlink() -> Dict[str, Any]:
         print(f"STATUS: Symlinked: {expected.name} → {Path(file_path_str).name}")
 
     # 4. Clean stale symlinks on non-primary files
+    # Bolt: Fetch only id and symlink_path to reduce payload size
     stale_files = pb.collection(COLL_FILE).get_full_list(
-        query_params={"filter": f"{MusicFile.IS_PRIMARY}=false && {MusicFile.SYMLINK_PATH}!=''"}
+        query_params={
+            "filter": f"{MusicFile.IS_PRIMARY}=false && {MusicFile.SYMLINK_PATH}!=''",
+            "fields": f"id,{MusicFile.SYMLINK_PATH}"
+        }
     )
 
     for file_record in stale_files:
