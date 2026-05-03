@@ -1,5 +1,6 @@
 import re
 import logging
+import concurrent.futures
 from pathlib import Path
 from typing import Dict, Any
 
@@ -61,6 +62,9 @@ def run_symlink() -> Dict[str, Any]:
 
     print(f"STATUS: Processing {len(primary_files)} primary files.")
 
+    # Track deferred DB updates for concurrent execution
+    updates_to_run = []
+
     # 3. Process each primary file
     for file_record in primary_files:
         file_path_str = getattr(file_record, MusicFile.FILE_PATH, '') or ''
@@ -107,10 +111,7 @@ def run_symlink() -> Dict[str, Any]:
             expected.unlink()
         expected.symlink_to(file_path_str)
 
-        # h. Update PocketBase
-        pb.collection(COLL_FILE).update(file_id, {MusicFile.SYMLINK_PATH: str(expected)})
-
-        # i. Track stats
+        # h. Track stats (we'll defer the DB update)
         if current is None:
             stats["created"] += 1
         else:
@@ -119,11 +120,31 @@ def run_symlink() -> Dict[str, Any]:
         # j. Log
         print(f"STATUS: Symlinked: {expected.name} → {Path(file_path_str).name}")
 
+        # Add to updates list
+        updates_to_run.append((file_id, str(expected)))
+
+    # 3.5 Execute deferred primary file DB updates concurrently
+    def _do_update(item):
+        f_id, spath = item
+        try:
+            pb.collection(COLL_FILE).update(f_id, {MusicFile.SYMLINK_PATH: spath})
+            return None
+        except Exception as e:
+            return f"Error updating {f_id}: {e}"
+
+    if updates_to_run:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            results = executor.map(_do_update, updates_to_run)
+            for err in results:
+                if err:
+                    stats["errors"].append(err)
+
     # 4. Clean stale symlinks on non-primary files
     stale_files = pb.collection(COLL_FILE).get_full_list(
         query_params={"filter": f"{MusicFile.IS_PRIMARY}=false && {MusicFile.SYMLINK_PATH}!=''"}
     )
 
+    stale_updates = []
     for file_record in stale_files:
         symlink_path_str = getattr(file_record, MusicFile.SYMLINK_PATH, None) or None
         if not symlink_path_str:
@@ -132,8 +153,22 @@ def run_symlink() -> Dict[str, Any]:
         if stale_path.is_symlink():
             stale_path.unlink()
             stats["removed"] += 1
-        pb.collection(COLL_FILE).update(file_record.id, {MusicFile.SYMLINK_PATH: ''})
+        stale_updates.append(file_record.id)
         print(f"STATUS: Removed stale symlink: {stale_path.name}")
+
+    def _do_stale_update(f_id):
+        try:
+            pb.collection(COLL_FILE).update(f_id, {MusicFile.SYMLINK_PATH: ''})
+            return None
+        except Exception as e:
+            return f"Error clearing symlink for {f_id}: {e}"
+
+    if stale_updates:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            results = executor.map(_do_stale_update, stale_updates)
+            for err in results:
+                if err:
+                    stats["errors"].append(err)
 
     print(
         f"STATUS: Done. created={stats['created']} updated={stats['updated']} "
