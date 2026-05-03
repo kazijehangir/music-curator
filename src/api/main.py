@@ -9,9 +9,10 @@ app = FastAPI(
     description="Backend compute service for the Music Curation Pipeline."
 )
 
+# SECURITY: Restrict CORS origins to prevent unauthorized authenticated requests
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
