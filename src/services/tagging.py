@@ -79,7 +79,10 @@ def run_tagging(pb: Optional[Any] = None) -> Dict[str, Any]:
 def process_release(pb, release, stats: Dict[str, Any]) -> bool:
     # Get all files for this release
     files = pb.collection(COLL_FILE).get_full_list(
-        query_params={"filter": f"{MusicFile.RELEASE}='{release.id}'"}
+        query_params={
+            "filter": f"{MusicFile.RELEASE}='{release.id}'",
+            "fields": f"id,{MusicFile.IS_PRIMARY},{MusicFile.FILE_PATH},{MusicFile.RAW_META},{MusicFile.SOURCE_DIR}"
+        }
     )
     if not files:
         return False
@@ -260,7 +263,10 @@ def _pass_3_llm(pb, release_id: str, primary_file, stats: Dict[str, Any]):
     debug_id = f"{primary_file.id}"
     try:
         sources = pb.collection(COLL_METADATA_SOURCE).get_full_list(
-            query_params={"filter": f"{MetadataSource.FILE}='{primary_file.id}'"}
+            query_params={
+                "filter": f"{MetadataSource.FILE}='{primary_file.id}'",
+                "fields": f"id,{MetadataSource.FIELD_NAME},{MetadataSource.CONFIDENCE},{MetadataSource.VALUE}"
+            }
         )
         best_tags: Dict[str, Any] = {}
         highest_conf: Dict[str, int] = {}
@@ -441,7 +447,10 @@ def _resolve_and_write_tags(pb, release_id: str, primary_file):
     # Query all metadata sources using primary file ID
     try:
         sources = pb.collection(COLL_METADATA_SOURCE).get_full_list(
-            query_params={"filter": f"{MetadataSource.FILE}='{primary_file.id}'"}
+            query_params={
+                "filter": f"{MetadataSource.FILE}='{primary_file.id}'",
+                "fields": f"id,{MetadataSource.FIELD_NAME},{MetadataSource.CONFIDENCE},{MetadataSource.VALUE}"
+            }
         )
         
         best_tags = {}

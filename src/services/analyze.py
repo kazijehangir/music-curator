@@ -172,7 +172,9 @@ def reanalyze_quality() -> Dict[str, Any]:
     pb = get_pb_client()
     stats = {"processed": 0, "errors": []}
 
-    all_files = pb.collection(COLL_FILE).get_full_list()
+    all_files = pb.collection(COLL_FILE).get_full_list(
+        query_params={"fields": f"id,{MusicFile.FILE_PATH}"}
+    )
     total = len(all_files)
     print(f"STATUS: Re-scoring quality for {total} files.")
 
@@ -287,7 +289,10 @@ def run_analysis(pb: Optional[Any] = None) -> Dict[str, Any]:
     # 3. Old long fingerprints (not 16 chars)
     try:
         unanalyzed_records = pb.collection('music_file').get_full_list(
-            query_params={"filter": "acoustid_fp='' || acoustid_fp=null || acoustid_fp='FAILED'"}
+            query_params={
+                "filter": "acoustid_fp='' || acoustid_fp=null || acoustid_fp='FAILED'",
+                "fields": f"id,file_path,codec,bitrate,bit_depth,{MusicFile.RELEASE},{MusicFile.RAW_META},acoustid_fp"
+            }
         )
     except Exception as e:
         logger.error(f"Failed to fetch unanalyzed files from pb: {e}")
