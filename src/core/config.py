@@ -19,6 +19,15 @@ class Settings(BaseSettings):
     ingest_dirs: str = "yubal,tidal-dl,adhoc" # Keep as comma separated string for env inject
     media_library_path: str
     
+    # CORS
+    cors_origins: list[str] = [
+        "http://localhost",
+        "http://localhost:8000",
+        "http://localhost:5173",
+        "http://127.0.0.1",
+        "http://127.0.0.1:8000",
+    ]
+
     model_config = SettingsConfigDict(
         env_file=".env", 
         env_file_encoding="utf-8",
