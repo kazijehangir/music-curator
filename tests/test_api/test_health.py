@@ -6,6 +6,30 @@ def test_health_check(client):
     assert "broken_symlinks" in data
     assert data["message"] == "Health skeleton"
 
+def test_cors_rejects_unauthorized_origin(client):
+    """Test that the application rejects unauthorized CORS origins on preflight requests."""
+    response = client.options(
+        "/api/health",
+        headers={
+            "Origin": "http://evil.com",
+            "Access-Control-Request-Method": "GET",
+        }
+    )
+    assert response.status_code == 400
+
+def test_cors_allows_authorized_origin(client):
+    """Test that the application allows authorized CORS origins."""
+    response = client.options(
+        "/api/health",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+        }
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert response.headers["access-control-allow-credentials"] == "true"
+
 def test_discover_streams_text(client, mocker):
     """POST /api/discover returns streaming plain text via the task manager."""
     async def mock_stream(*args, **kwargs):
