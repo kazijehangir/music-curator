@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     lm_studio_url: str = "http://localhost:1234/v1" # Overridden by LM_STUDIO_URL env var
     llm_model_name: str = "openai/gpt-oss-20b"
     
+    cors_allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
     # Internal Paths
     nas_mount_path: str
     ingest_base_path: str
