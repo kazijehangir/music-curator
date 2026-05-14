@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import json
-from src.services.tagging import _pass_2_sidecars, _pass_3_llm, run_tagging, process_release
+from src.services.tagging import _pass_1_beets, _pass_2_sidecars, _pass_3_llm, run_tagging, process_release
 
 @pytest.fixture
 def mock_httpx():
@@ -53,3 +53,25 @@ def test_pass_3_llm(mock_pocketbase, mock_httpx):
     # Called for 4 fields (title, artist, genre, language - album is null)
     assert mock_pocketbase.collection.return_value.create.call_count == 4
     assert stats["llm_processed"] == 1
+
+def test_pass_1_beets_uses_separator():
+    """Verify that _pass_1_beets uses the '--' separator to prevent argument injection."""
+    file_record = MagicMock()
+    file_record.file_path = "-h"  # Payload that could trigger a command flag
+
+    with patch("src.services.tagging.subprocess.run") as mock_run:
+        # Mock mutagen.File so it doesn't fail on "-h" path
+        with patch("src.services.tagging.mutagen.File", return_value=None):
+            _pass_1_beets(file_record)
+
+            mock_run.assert_called_once()
+            args = mock_run.call_args[0][0]
+
+            # The args should contain "--" before the file path
+            assert "--" in args
+
+            separator_idx = args.index("--")
+            file_path_idx = args.index("-h")
+
+            # The separator MUST come before the file path
+            assert separator_idx < file_path_idx
