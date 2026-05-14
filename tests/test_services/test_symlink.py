@@ -107,10 +107,7 @@ def test_target_path_unknown_codec_falls_back_to_file_ext(tmp_path):
 def _make_pb_mock(mocker, releases, primary_files, stale_files=None, library_path='/fake/library'):
     """Returns a configured mock PocketBase client.
 
-    get_full_list side_effect order mirrors run_symlink() call order:
-      1. all releases (COLL_RELEASE)
-      2. is_primary=true files (COLL_FILE)
-      3. is_primary=false && symlink_path!='' files (COLL_FILE)
+    get_full_list side_effect is mapped using a dynamic mock function.
     """
     mock_pb = MagicMock()
     mocker.patch("src.services.symlink.get_pb_client", return_value=mock_pb)
@@ -119,11 +116,19 @@ def _make_pb_mock(mocker, releases, primary_files, stale_files=None, library_pat
         media_library_path=library_path,
     )
 
-    mock_pb.collection.return_value.get_full_list.side_effect = [
-        releases,
-        primary_files,
-        stale_files if stale_files is not None else [],
-    ]
+    def dynamic_get_full_list(*args, **kwargs):
+        query_params = kwargs.get('query_params', {})
+        filter_str = query_params.get('filter', '')
+        if f"{MusicFile.IS_PRIMARY}=true" in filter_str:
+            return primary_files
+        elif f"{MusicFile.IS_PRIMARY}=false" in filter_str:
+            return stale_files if stale_files is not None else []
+        elif filter_str.startswith("id="):
+            # This handles the chunked queries for releases
+            return releases
+        return []
+
+    mock_pb.collection.return_value.get_full_list.side_effect = dynamic_get_full_list
     return mock_pb
 
 
