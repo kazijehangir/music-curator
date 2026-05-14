@@ -1,4 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
+from typing import List, Union
 
 class Settings(BaseSettings):
     project_name: str = "Music Curator API"
@@ -9,6 +11,16 @@ class Settings(BaseSettings):
     pocketbase_admin_email: str
     pocketbase_admin_password: str
     
+    # Security
+    cors_origins: Union[str, List[str]] = ["http://localhost:8090", "http://127.0.0.1:8090"]
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v):
+        if isinstance(v, str) and not v.startswith("["):
+            return [i.strip() for i in v.split(",") if i.strip()]
+        return v
+
     # External APIs
     lm_studio_url: str = "http://localhost:1234/v1" # Overridden by LM_STUDIO_URL env var
     llm_model_name: str = "openai/gpt-oss-20b"
