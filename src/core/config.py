@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     pocketbase_url: str = "http://127.0.0.1:8090" # Used as default if internal env not supplied
     pocketbase_admin_email: str
     pocketbase_admin_password: str
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     
     # External APIs
     lm_studio_url: str = "http://localhost:1234/v1" # Overridden by LM_STUDIO_URL env var
