@@ -1,12 +1,35 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import json
-from src.services.tagging import _pass_2_sidecars, _pass_3_llm, run_tagging, process_release
+from src.services.tagging import _pass_1_beets, _pass_2_sidecars, _pass_3_llm, run_tagging, process_release
 
 @pytest.fixture
 def mock_httpx():
     with patch("src.services.tagging.httpx.post") as mock_post:
         yield mock_post
+
+@patch("src.services.tagging.subprocess.run")
+@patch("src.services.tagging.mutagen.File")
+def test_pass_1_beets(mock_mutagen_file, mock_subprocess_run):
+    primary_file = MagicMock()
+    primary_file.file_path = "/test/song.opus"
+
+    mock_file = MagicMock()
+    mock_file.__contains__.return_value = True
+    mock_file.__getitem__.return_value = ["mbid-1234"]
+    mock_mutagen_file.return_value = mock_file
+
+    result = _pass_1_beets(primary_file)
+
+    assert result == "mbid-1234"
+    assert mock_subprocess_run.call_count == 1
+    call_args = mock_subprocess_run.call_args[0][0]
+
+    # Assert that the '--' argument separator is present
+    assert "--" in call_args
+    # Assert that '--' is exactly before the file path
+    assert call_args[-2] == "--"
+    assert call_args[-1] == "/test/song.opus"
 
 def test_pass_2_sidecars(mock_pocketbase, fs):
     # Setup realistic file structure
