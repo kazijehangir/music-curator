@@ -50,14 +50,27 @@ def run_symlink() -> Dict[str, Any]:
         "errors": [],
     }
 
-    # 1. Load all releases into a lookup dict (single bulk query)
-    all_releases = pb.collection(COLL_RELEASE).get_full_list()
-    releases_by_id = {r.id: r for r in all_releases}
-
-    # 2. Fetch all primary files
+    # 1. Fetch all primary files, restricted to necessary fields
     primary_files = pb.collection(COLL_FILE).get_full_list(
-        query_params={"filter": f"{MusicFile.IS_PRIMARY}=true"}
+        query_params={
+            "filter": f"{MusicFile.IS_PRIMARY}=true",
+            "fields": f"id,{MusicFile.RELEASE},{MusicFile.CODEC},{MusicFile.FILE_PATH},{MusicFile.SYMLINK_PATH}"
+        }
     )
+
+    # 2. Load only the referenced releases into a lookup dict (chunked)
+    release_ids = list({getattr(f, MusicFile.RELEASE, None) for f in primary_files if getattr(f, MusicFile.RELEASE, None)})
+    releases_by_id = {}
+
+    # Chunk by 50 to avoid URI length limits or SQLITE_MAX_EXPR_DEPTH
+    for i in range(0, len(release_ids), 50):
+        chunk = release_ids[i:i+50]
+        filter_str = " || ".join(f"id='{rid}'" for rid in chunk)
+        chunk_releases = pb.collection(COLL_RELEASE).get_full_list(
+            query_params={"filter": filter_str, "fields": f"id,{Release.ARTIST},{Release.TITLE},{Release.ALBUM}"}
+        )
+        for r in chunk_releases:
+            releases_by_id[r.id] = r
 
     print(f"STATUS: Processing {len(primary_files)} primary files.")
 
@@ -121,7 +134,10 @@ def run_symlink() -> Dict[str, Any]:
 
     # 4. Clean stale symlinks on non-primary files
     stale_files = pb.collection(COLL_FILE).get_full_list(
-        query_params={"filter": f"{MusicFile.IS_PRIMARY}=false && {MusicFile.SYMLINK_PATH}!=''"}
+        query_params={
+            "filter": f"{MusicFile.IS_PRIMARY}=false && {MusicFile.SYMLINK_PATH}!=''",
+            "fields": f"id,{MusicFile.SYMLINK_PATH}"
+        }
     )
 
     for file_record in stale_files:

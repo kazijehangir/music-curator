@@ -119,11 +119,21 @@ def _make_pb_mock(mocker, releases, primary_files, stale_files=None, library_pat
         media_library_path=library_path,
     )
 
-    mock_pb.collection.return_value.get_full_list.side_effect = [
-        releases,
-        primary_files,
-        stale_files if stale_files is not None else [],
-    ]
+    def get_full_list_mock(*args, **kwargs):
+        filter_str = kwargs.get('query_params', {}).get('filter', '')
+        if 'is_primary=true' in filter_str:
+            return primary_files
+        elif 'is_primary=false' in filter_str:
+            return stale_files if stale_files is not None else []
+        elif filter_str:
+            # We are chunking releases with dynamic id='x' || id='y'
+            # Parse IDs from filter string: id='rel001' || id='rel002'
+            import re
+            ids = re.findall(r"id='([^']+)'", filter_str)
+            return [r for r in releases if r.id in ids]
+        return releases # Default fallback, shouldn't be hit if we refactor properly
+
+    mock_pb.collection.return_value.get_full_list.side_effect = get_full_list_mock
     return mock_pb
 
 
