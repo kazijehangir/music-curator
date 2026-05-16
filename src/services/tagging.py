@@ -62,10 +62,31 @@ def run_tagging(pb: Optional[Any] = None) -> Dict[str, Any]:
         stats["errors"].append(str(e))
         return stats
         
+    # Prefetch files to resolve N+1 query problem, avoiding SQLite depth limits via chunking
+    from collections import defaultdict
+    files_by_release = defaultdict(list)
+    chunk_size = 50
+    release_ids = [r.id for r in releases]
+
+    for i in range(0, len(release_ids), chunk_size):
+        chunk = release_ids[i:i+chunk_size]
+        filter_str = " || ".join([f"{MusicFile.RELEASE}='{rid}'" for rid in chunk])
+        try:
+            chunk_files = pb.collection(COLL_FILE).get_full_list(
+                query_params={"filter": filter_str}
+            )
+            for f in chunk_files:
+                rel_id = getattr(f, MusicFile.RELEASE, None)
+                if rel_id:
+                    files_by_release[rel_id].append(f)
+        except Exception as e:
+            logger.error(f"Failed to prefetch files for releases: {e}")
+            stats["errors"].append(f"Prefetch error: {e}")
+
     for idx, r in enumerate(releases):
         print(f"STATUS: Tagging release {r.id} ({idx+1}/{len(releases)})")
         try:
-            success = process_release(pb, r, stats)
+            success = process_release(pb, r, stats, prefetched_files=files_by_release.get(r.id, []))
             if success:
                 stats["tagged"] += 1
         except Exception as e:
@@ -76,11 +97,15 @@ def run_tagging(pb: Optional[Any] = None) -> Dict[str, Any]:
     print(f"STATUS: Tagging complete. Processed {stats['tagged']} releases.")
     return stats
 
-def process_release(pb, release, stats: Dict[str, Any]) -> bool:
+def process_release(pb, release, stats: Dict[str, Any], prefetched_files: Optional[List[Any]] = None) -> bool:
     # Get all files for this release
-    files = pb.collection(COLL_FILE).get_full_list(
-        query_params={"filter": f"{MusicFile.RELEASE}='{release.id}'"}
-    )
+    if prefetched_files is not None:
+        files = prefetched_files
+    else:
+        files = pb.collection(COLL_FILE).get_full_list(
+            query_params={"filter": f"{MusicFile.RELEASE}='{release.id}'"}
+        )
+
     if not files:
         return False
 
