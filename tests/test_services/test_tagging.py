@@ -53,3 +53,86 @@ def test_pass_3_llm(mock_pocketbase, mock_httpx):
     # Called for 4 fields (title, artist, genre, language - album is null)
     assert mock_pocketbase.collection.return_value.create.call_count == 4
     assert stats["llm_processed"] == 1
+
+@patch("src.services.tagging.process_release")
+def test_run_tagging_prefetch(mock_process_release, mock_pocketbase):
+    # Create two releases
+    r1 = MagicMock()
+    r1.id = "rel1"
+    r2 = MagicMock()
+    r2.id = "rel2"
+
+    # Create files referencing these releases
+    f1 = MagicMock()
+    f1.release = "rel1"
+    f2 = MagicMock()
+    f2.release = "rel2"
+
+    def dynamic_mock_get_full_list(*args, **kwargs):
+        query_params = kwargs.get("query_params", {})
+        filter_str = query_params.get("filter", "")
+        # Mock release fetch
+        if "mb_status" in filter_str:
+            return [r1, r2]
+        # Mock prefetch files fetch
+        elif "release=" in filter_str:
+            return [f1, f2]
+        return []
+
+    mock_pocketbase.collection.return_value.get_full_list.side_effect = dynamic_mock_get_full_list
+    mock_process_release.return_value = True
+
+    stats = run_tagging(mock_pocketbase)
+
+    assert stats["tagged"] == 2
+    assert mock_process_release.call_count == 2
+    # Verify the chunked prefetch was called
+    # One call for releases, one call for prefetching the 2 files
+    assert mock_pocketbase.collection.return_value.get_full_list.call_count == 2
+
+def test_run_tagging_fetch_releases_error(mock_pocketbase):
+    mock_pocketbase.collection.return_value.get_full_list.side_effect = Exception("DB down")
+    stats = run_tagging(mock_pocketbase)
+    assert "DB down" in stats["errors"][0]
+
+@patch("src.services.tagging.process_release")
+def test_run_tagging_prefetch_files_error(mock_process_release, mock_pocketbase):
+    r1 = MagicMock()
+    r1.id = "rel1"
+
+    def dynamic_mock_get_full_list(*args, **kwargs):
+        filter_str = kwargs.get("query_params", {}).get("filter", "")
+        if "mb_status" in filter_str:
+            return [r1]
+        elif "release=" in filter_str:
+            raise Exception("Prefetch error mock")
+        return []
+
+    mock_pocketbase.collection.return_value.get_full_list.side_effect = dynamic_mock_get_full_list
+    mock_process_release.return_value = True
+
+    stats = run_tagging(mock_pocketbase)
+    assert any("Prefetch error mock" in err for err in stats["errors"])
+
+@patch("src.services.tagging.process_release")
+def test_run_tagging_process_error(mock_process_release, mock_pocketbase):
+    r1 = MagicMock()
+    r1.id = "rel1"
+
+    def dynamic_mock_get_full_list(*args, **kwargs):
+        filter_str = kwargs.get("query_params", {}).get("filter", "")
+        if "mb_status" in filter_str:
+            return [r1]
+        return []
+
+    mock_pocketbase.collection.return_value.get_full_list.side_effect = dynamic_mock_get_full_list
+    mock_process_release.side_effect = Exception("Process error mock")
+
+    stats = run_tagging(mock_pocketbase)
+    assert any("Process error mock" in err for err in stats["errors"])
+
+def test_run_tagging_no_pb(mock_pocketbase):
+    with patch("src.services.discover.get_pb_client", return_value=mock_pocketbase):
+        mock_pocketbase.collection.return_value.get_full_list.return_value = []
+        stats = run_tagging()
+        assert stats["tagged"] == 0
