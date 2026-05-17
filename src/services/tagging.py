@@ -4,6 +4,7 @@ import re
 import httpx
 import sys
 from pathlib import Path
+from collections import defaultdict
 from typing import List, Dict, Any, Optional
 
 from src.core.config import settings
@@ -61,11 +62,29 @@ def run_tagging(pb: Optional[Any] = None) -> Dict[str, Any]:
         logger.error(f"Failed to fetch releases for tagging: {e}")
         stats["errors"].append(str(e))
         return stats
-        
+
+    files_by_release = defaultdict(list)
+    if releases:
+        print("STATUS: Prefetching files to avoid N+1 queries...")
+        release_ids = [r.id for r in releases]
+        chunk_size = 50
+        for i in range(0, len(release_ids), chunk_size):
+            chunk = release_ids[i:i + chunk_size]
+            filter_str = " || ".join([f"{MusicFile.RELEASE}='{rid}'" for rid in chunk])
+            try:
+                chunk_files = pb.collection(COLL_FILE).get_full_list(
+                    query_params={"filter": filter_str}
+                )
+                for f in chunk_files:
+                    files_by_release[getattr(f, MusicFile.RELEASE)].append(f)
+            except Exception as e:
+                logger.error(f"Failed to prefetch files for chunk: {e}")
+                stats["errors"].append(f"Prefetch error: {e}")
+
     for idx, r in enumerate(releases):
         print(f"STATUS: Tagging release {r.id} ({idx+1}/{len(releases)})")
         try:
-            success = process_release(pb, r, stats)
+            success = process_release(pb, r, stats, files_by_release.get(r.id, []))
             if success:
                 stats["tagged"] += 1
         except Exception as e:
@@ -76,11 +95,11 @@ def run_tagging(pb: Optional[Any] = None) -> Dict[str, Any]:
     print(f"STATUS: Tagging complete. Processed {stats['tagged']} releases.")
     return stats
 
-def process_release(pb, release, stats: Dict[str, Any]) -> bool:
-    # Get all files for this release
-    files = pb.collection(COLL_FILE).get_full_list(
-        query_params={"filter": f"{MusicFile.RELEASE}='{release.id}'"}
-    )
+def process_release(pb, release, stats: Dict[str, Any], files: Optional[List[Any]] = None) -> bool:
+    if files is None:
+        files = pb.collection(COLL_FILE).get_full_list(
+            query_params={"filter": f"{MusicFile.RELEASE}='{release.id}'"}
+        )
     if not files:
         return False
 
