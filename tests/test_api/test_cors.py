@@ -34,3 +34,30 @@ def test_cors_request_disallowed(client):
     )
     assert response.status_code == 200
     assert "access-control-allow-origin" not in response.headers
+
+def test_cors_config_assemble_from_string():
+    from src.core.config import Settings
+    import os
+    os.environ["CORS_ALLOWED_ORIGINS"] = "http://test1.com, http://test2.com ,http://test3.com"
+    os.environ["POCKETBASE_ADMIN_EMAIL"] = "test@test.com"
+    os.environ["POCKETBASE_ADMIN_PASSWORD"] = "password"
+    os.environ["NAS_MOUNT_PATH"] = "/tmp/nas"
+    os.environ["INGEST_BASE_PATH"] = "/tmp/ingest"
+    os.environ["MEDIA_LIBRARY_PATH"] = "/tmp/media"
+
+    settings = Settings()
+    assert settings.cors_allowed_origins == ["http://test1.com", "http://test2.com", "http://test3.com"]
+
+    del os.environ["CORS_ALLOWED_ORIGINS"]
+
+def test_cors_config_assemble_from_list():
+    from src.core.config import Settings
+    import os
+    os.environ["POCKETBASE_ADMIN_EMAIL"] = "test@test.com"
+    os.environ["POCKETBASE_ADMIN_PASSWORD"] = "password"
+    os.environ["NAS_MOUNT_PATH"] = "/tmp/nas"
+    os.environ["INGEST_BASE_PATH"] = "/tmp/ingest"
+    os.environ["MEDIA_LIBRARY_PATH"] = "/tmp/media"
+
+    settings = Settings(cors_allowed_origins=["http://test1.com", "http://test2.com"])
+    assert settings.cors_allowed_origins == ["http://test1.com", "http://test2.com"]
