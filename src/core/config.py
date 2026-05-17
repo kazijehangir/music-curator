@@ -1,7 +1,15 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     project_name: str = "Music Curator API"
+    cors_allowed_origins: str | list[str] = "http://127.0.0.1:8090,http://localhost:3000"
+
+    @model_validator(mode="after")
+    def assemble_cors_origins(self):
+        if isinstance(self.cors_allowed_origins, str):
+            self.cors_allowed_origins = [i.strip() for i in self.cors_allowed_origins.split(",") if i.strip()]
+        return self
     version: str = "3.0.0"
     
     # Internal APIs
