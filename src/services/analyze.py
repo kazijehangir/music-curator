@@ -10,6 +10,7 @@ from src.core.schema import COLL_RELEASE, COLL_FILE, Release, MusicFile
 
 logger = logging.getLogger(__name__)
 
+import concurrent.futures
 import mutagen
 
 def generate_acoustid(file_path: Path) -> Optional[str]:
@@ -176,17 +177,16 @@ def reanalyze_quality() -> Dict[str, Any]:
     total = len(all_files)
     print(f"STATUS: Re-scoring quality for {total} files.")
 
-    for i, record in enumerate(all_files):
+    def process_file(record) -> str | None:
         file_path_str = getattr(record, MusicFile.FILE_PATH, None)
         if not file_path_str:
-            continue
+            return "SKIP"
 
         file_path = Path(file_path_str)
         if not file_path.exists():
-            stats["errors"].append(f"File not found: {file_path_str}")
-            continue
+            return f"File not found: {file_path_str}"
 
-        print(f"STATUS: [{i+1}/{total}] {file_path.name}")
+        print(f"STATUS: Analyzing {file_path.name}")
         try:
             # Re-extract codec and bit_depth (fixes stale null values).
             meta = extract_metadata(file_path)
@@ -204,11 +204,22 @@ def reanalyze_quality() -> Dict[str, Any]:
                 MusicFile.QUALITY_SCORE: score,
                 MusicFile.QUALITY_VERDICT: verdict,
             })
-            stats["processed"] += 1
+            return None  # Success
         except Exception as e:
             msg = f"Error re-scoring {file_path_str}: {e}"
             logger.error(msg)
-            stats["errors"].append(msg)
+            return msg
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        # Map returns results in the same order as iterables
+        results = executor.map(process_file, all_files)
+        for result in results:
+            if result == "SKIP":
+                continue
+            elif result:
+                stats["errors"].append(result)
+            else:
+                stats["processed"] += 1
 
     print(f"STATUS: Done. Re-scored {stats['processed']} / {total} files.")
     return stats
