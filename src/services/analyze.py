@@ -170,21 +170,25 @@ def reanalyze_quality() -> Dict[str, Any]:
     from src.services.discover import get_pb_client, extract_metadata
 
     pb = get_pb_client()
+    import concurrent.futures
+
     stats = {"processed": 0, "errors": []}
 
-    all_files = pb.collection(COLL_FILE).get_full_list()
+    all_files = pb.collection(COLL_FILE).get_full_list(
+        query_params={"fields": f"id,{MusicFile.FILE_PATH}"}
+    )
     total = len(all_files)
     print(f"STATUS: Re-scoring quality for {total} files.")
 
-    for i, record in enumerate(all_files):
+    def _process_record(item) -> Any:
+        i, record = item
         file_path_str = getattr(record, MusicFile.FILE_PATH, None)
         if not file_path_str:
-            continue
+            return "SKIP"
 
         file_path = Path(file_path_str)
         if not file_path.exists():
-            stats["errors"].append(f"File not found: {file_path_str}")
-            continue
+            return {"error": f"File not found: {file_path_str}"}
 
         print(f"STATUS: [{i+1}/{total}] {file_path.name}")
         try:
@@ -204,11 +208,20 @@ def reanalyze_quality() -> Dict[str, Any]:
                 MusicFile.QUALITY_SCORE: score,
                 MusicFile.QUALITY_VERDICT: verdict,
             })
-            stats["processed"] += 1
+            return "SUCCESS"
         except Exception as e:
             msg = f"Error re-scoring {file_path_str}: {e}"
             logger.error(msg)
-            stats["errors"].append(msg)
+            return {"error": msg}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        for result in executor.map(_process_record, enumerate(all_files)):
+            if result == "SKIP":
+                continue
+            elif isinstance(result, dict) and "error" in result:
+                stats["errors"].append(result["error"])
+            elif result == "SUCCESS":
+                stats["processed"] += 1
 
     print(f"STATUS: Done. Re-scored {stats['processed']} / {total} files.")
     return stats
