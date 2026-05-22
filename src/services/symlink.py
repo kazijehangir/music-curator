@@ -50,14 +50,23 @@ def run_symlink() -> Dict[str, Any]:
         "errors": [],
     }
 
-    # 1. Load all releases into a lookup dict (single bulk query)
-    all_releases = pb.collection(COLL_RELEASE).get_full_list()
-    releases_by_id = {r.id: r for r in all_releases}
-
-    # 2. Fetch all primary files
+    # 1. Fetch all primary files
     primary_files = pb.collection(COLL_FILE).get_full_list(
         query_params={"filter": f"{MusicFile.IS_PRIMARY}=true"}
     )
+
+    # 2. Extract unique release IDs and fetch only those releases in chunks
+    release_ids = list({getattr(f, MusicFile.RELEASE, None) for f in primary_files if getattr(f, MusicFile.RELEASE, None)})
+    releases_by_id = {}
+
+    chunk_size = 50
+    for i in range(0, len(release_ids), chunk_size):
+        chunk = release_ids[i:i + chunk_size]
+        filter_str = " || ".join(f"id='{rid}'" for rid in chunk)
+        if filter_str:
+            chunk_releases = pb.collection(COLL_RELEASE).get_full_list(query_params={"filter": filter_str})
+            for r in chunk_releases:
+                releases_by_id[r.id] = r
 
     print(f"STATUS: Processing {len(primary_files)} primary files.")
 
