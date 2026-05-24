@@ -62,78 +62,86 @@ def run_symlink() -> Dict[str, Any]:
     print(f"STATUS: Processing {len(primary_files)} primary files.")
 
     # 3. Process each primary file
-    for file_record in primary_files:
+    def _process_primary(file_record):
         file_path_str = getattr(file_record, MusicFile.FILE_PATH, '') or ''
         file_id = file_record.id
 
-        # a. Look up release
         release_id = getattr(file_record, MusicFile.RELEASE, None)
         if not release_id or release_id not in releases_by_id:
             msg = f"Primary file {file_id} has no valid release — skipping"
             logger.warning(msg)
-            stats["errors"].append(msg)
-            continue
+            return ("ERROR", msg)
 
         release = releases_by_id[release_id]
 
-        # b. Check file exists on disk
         if not file_path_str or not Path(file_path_str).exists():
             msg = f"Primary file not found on disk: {file_path_str or file_id}"
             logger.warning(msg)
-            stats["errors"].append(msg)
-            continue
+            return ("ERROR", msg)
 
-        # c. Compute expected symlink path
         expected = _target_path(release, file_record, library)
-
-        # d. Current symlink path (stored in DB)
         current = getattr(file_record, MusicFile.SYMLINK_PATH, None) or None
 
-        # e. If old symlink is at a different location, remove it
+        removed = 0
         if current and str(expected) != current:
             old_path = Path(current)
             if old_path.is_symlink():
                 old_path.unlink()
-                stats["removed"] += 1
+                removed = 1
 
-        # f. If expected is already a valid symlink to the same source → no-op
         if (expected.is_symlink()
                 and str(expected.resolve()) == str(Path(file_path_str).resolve())):
-            continue
+            return ("SKIP", removed)
 
-        # g. Create/replace symlink
         expected.parent.mkdir(parents=True, exist_ok=True)
         if expected.exists() or expected.is_symlink():
             expected.unlink()
         expected.symlink_to(file_path_str)
 
-        # h. Update PocketBase
         pb.collection(COLL_FILE).update(file_id, {MusicFile.SYMLINK_PATH: str(expected)})
 
-        # i. Track stats
-        if current is None:
-            stats["created"] += 1
-        else:
-            stats["updated"] += 1
-
-        # j. Log
+        status = "CREATED" if current is None else "UPDATED"
         print(f"STATUS: Symlinked: {expected.name} → {Path(file_path_str).name}")
+        return ("SUCCESS", status, removed)
+
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
+        for res in ex.map(_process_primary, primary_files):
+            if res[0] == "ERROR":
+                stats["errors"].append(res[1])
+            elif res[0] == "SKIP":
+                stats["removed"] += res[1]
+            elif res[0] == "SUCCESS":
+                if res[1] == "CREATED":
+                    stats["created"] += 1
+                else:
+                    stats["updated"] += 1
+                stats["removed"] += res[2]
 
     # 4. Clean stale symlinks on non-primary files
     stale_files = pb.collection(COLL_FILE).get_full_list(
         query_params={"filter": f"{MusicFile.IS_PRIMARY}=false && {MusicFile.SYMLINK_PATH}!=''"}
     )
 
-    for file_record in stale_files:
+    def _process_stale(file_record):
         symlink_path_str = getattr(file_record, MusicFile.SYMLINK_PATH, None) or None
         if not symlink_path_str:
-            continue
+            return "SKIP"
         stale_path = Path(symlink_path_str)
+        removed = False
         if stale_path.is_symlink():
             stale_path.unlink()
-            stats["removed"] += 1
+            removed = True
         pb.collection(COLL_FILE).update(file_record.id, {MusicFile.SYMLINK_PATH: ''})
         print(f"STATUS: Removed stale symlink: {stale_path.name}")
+        return ("REMOVED", removed)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
+        for res in ex.map(_process_stale, stale_files):
+            if res == "SKIP":
+                continue
+            if res[0] == "REMOVED" and res[1]:
+                stats["removed"] += 1
 
     print(
         f"STATUS: Done. created={stats['created']} updated={stats['updated']} "
