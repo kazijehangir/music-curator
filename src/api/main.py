@@ -9,9 +9,12 @@ app = FastAPI(
     description="Backend compute service for the Music Curation Pipeline."
 )
 
+# Parse CORS origins from config
+origins = [origin.strip() for origin in settings.cors_allowed_origins.split(",")]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
