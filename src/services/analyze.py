@@ -176,17 +176,24 @@ def reanalyze_quality() -> Dict[str, Any]:
     total = len(all_files)
     print(f"STATUS: Re-scoring quality for {total} files.")
 
-    for i, record in enumerate(all_files):
+    # ⚡ Bolt Optimization:
+    # Processing thousands of files sequentially for quality re-analysis poses a severe
+    # performance bottleneck due to the N+1 updates and I/O costs. Because `httpx.Client`
+    # (used internally by PocketBase) is thread-safe, these operations can be safely parallelized.
+    # Expected Impact: Significantly decreases total execution time for bulk re-analysis
+    # by processing up to 5 file records concurrently.
+    import concurrent.futures
+
+    def _process_record(record):
         file_path_str = getattr(record, MusicFile.FILE_PATH, None)
         if not file_path_str:
-            continue
+            return "SKIP"
 
         file_path = Path(file_path_str)
         if not file_path.exists():
-            stats["errors"].append(f"File not found: {file_path_str}")
-            continue
+            return {"error": f"File not found: {file_path_str}"}
 
-        print(f"STATUS: [{i+1}/{total}] {file_path.name}")
+        print(f"STATUS: Processing {file_path.name}")
         try:
             # Re-extract codec and bit_depth (fixes stale null values).
             meta = extract_metadata(file_path)
@@ -204,11 +211,20 @@ def reanalyze_quality() -> Dict[str, Any]:
                 MusicFile.QUALITY_SCORE: score,
                 MusicFile.QUALITY_VERDICT: verdict,
             })
-            stats["processed"] += 1
+            return "SUCCESS"
         except Exception as e:
             msg = f"Error re-scoring {file_path_str}: {e}"
             logger.error(msg)
-            stats["errors"].append(msg)
+            return {"error": msg}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        for result in executor.map(_process_record, all_files):
+            if result == "SKIP":
+                continue
+            elif isinstance(result, dict) and "error" in result:
+                stats["errors"].append(result["error"])
+            elif result == "SUCCESS":
+                stats["processed"] += 1
 
     print(f"STATUS: Done. Re-scored {stats['processed']} / {total} files.")
     return stats
