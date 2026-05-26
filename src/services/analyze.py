@@ -10,6 +10,7 @@ from src.core.schema import COLL_RELEASE, COLL_FILE, Release, MusicFile
 
 logger = logging.getLogger(__name__)
 
+import concurrent.futures
 import mutagen
 
 def generate_acoustid(file_path: Path) -> Optional[str]:
@@ -176,17 +177,15 @@ def reanalyze_quality() -> Dict[str, Any]:
     total = len(all_files)
     print(f"STATUS: Re-scoring quality for {total} files.")
 
-    for i, record in enumerate(all_files):
+    def _process_record(record):
         file_path_str = getattr(record, MusicFile.FILE_PATH, None)
         if not file_path_str:
-            continue
+            return "SKIP"
 
         file_path = Path(file_path_str)
         if not file_path.exists():
-            stats["errors"].append(f"File not found: {file_path_str}")
-            continue
+            return f"ERROR: File not found: {file_path_str}"
 
-        print(f"STATUS: [{i+1}/{total}] {file_path.name}")
         try:
             # Re-extract codec and bit_depth (fixes stale null values).
             meta = extract_metadata(file_path)
@@ -197,6 +196,11 @@ def reanalyze_quality() -> Dict[str, Any]:
             ceiling = get_spectral_ceiling(file_path)
             score, verdict = calculate_quality_score(codec, bitrate, bit_depth, ceiling)
 
+            # ⚡ Bolt Optimization: Parallelize PocketBase updates
+            # PocketBase SDK's httpx.Client is thread-safe. By running these
+            # network-bound updates concurrently, we avoid the sequential N+1 bottleneck,
+            # significantly improving overall execution time.
+            # Expected Impact: Reduces N+1 I/O blocking time drastically for large libraries.
             pb.collection(COLL_FILE).update(record.id, {
                 MusicFile.CODEC: codec or None,
                 MusicFile.BIT_DEPTH: bit_depth,
@@ -204,11 +208,24 @@ def reanalyze_quality() -> Dict[str, Any]:
                 MusicFile.QUALITY_SCORE: score,
                 MusicFile.QUALITY_VERDICT: verdict,
             })
-            stats["processed"] += 1
+            return "SUCCESS"
         except Exception as e:
             msg = f"Error re-scoring {file_path_str}: {e}"
             logger.error(msg)
-            stats["errors"].append(msg)
+            return f"ERROR: {msg}"
+
+    # ⚡ Bolt Optimization: Replace sequential loop with ThreadPoolExecutor
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        for i, result in enumerate(executor.map(_process_record, all_files)):
+            if (i + 1) % 10 == 0 or (i + 1) == total:
+                print(f"STATUS: Processed [{i+1}/{total}] files...")
+
+            if result == "SKIP":
+                continue
+            elif result.startswith("ERROR: "):
+                stats["errors"].append(result[7:])
+            elif result == "SUCCESS":
+                stats["processed"] += 1
 
     print(f"STATUS: Done. Re-scored {stats['processed']} / {total} files.")
     return stats
