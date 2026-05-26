@@ -4,6 +4,9 @@ class Settings(BaseSettings):
     project_name: str = "Music Curator API"
     version: str = "3.0.0"
     
+    # Security / CORS
+    cors_allowed_origins: str = "http://127.0.0.1:8090,http://localhost:3000"
+
     # Internal APIs
     pocketbase_url: str = "http://127.0.0.1:8090" # Used as default if internal env not supplied
     pocketbase_admin_email: str
