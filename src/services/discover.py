@@ -131,25 +131,24 @@ def repair_file_metadata() -> Dict[str, Any]:
     stats["checked"] = len(records)
     print(f"STATUS: Found {stats['checked']} files with empty metadata.")
 
-    for record in records:
+    # ⚡ Bolt Optimization: PocketBase/httpx is thread-safe. Parallelizing these DB updates
+    # and metadata extractions reduces total time from O(N * network_latency) to O(N/workers * network_latency).
+    def _process_record(record):
         file_path_str = getattr(record, MusicFile.FILE_PATH, None)
         if not file_path_str:
-            continue
+            return "SKIP", None
         filepath = Path(file_path_str)
         if not filepath.exists():
-            stats["errors"].append(f"File not found on disk: {file_path_str}")
-            continue
+            return "ERROR", f"File not found on disk: {file_path_str}"
 
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
                 future = ex.submit(extract_metadata, filepath)
                 meta = future.result(timeout=FILE_TIMEOUT_SECONDS)
         except concurrent.futures.TimeoutError:
-            stats["errors"].append(f"Timed out reading metadata for {file_path_str}")
-            continue
+            return "ERROR", f"Timed out reading metadata for {file_path_str}"
         except Exception as e:
-            stats["errors"].append(f"Metadata error for {file_path_str}: {e}")
-            continue
+            return "ERROR", f"Metadata error for {file_path_str}: {e}"
 
         raw_title  = meta.get('title')  or ""
         raw_artist = meta.get('artist') or ""
@@ -157,8 +156,7 @@ def repair_file_metadata() -> Dict[str, Any]:
         new_combo  = f"{raw_title} | {raw_artist} | {raw_album}"
 
         if new_combo == EMPTY_COMBO:
-            stats["errors"].append(f"Still no metadata after re-extraction: {file_path_str}")
-            continue
+            return "ERROR", f"Still no metadata after re-extraction: {file_path_str}"
 
         update_data = {MusicFile.RAW_META: new_combo}
         if meta.get('codec'):
@@ -166,7 +164,15 @@ def repair_file_metadata() -> Dict[str, Any]:
 
         pb.collection(COLL_FILE).update(record.id, update_data)
         print(f"STATUS: Repaired: {filepath.name} → {new_combo}")
-        stats["repaired"] += 1
+        return "SUCCESS", None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        results = executor.map(_process_record, records)
+        for status, err_msg in results:
+            if status == "ERROR":
+                stats["errors"].append(err_msg)
+            elif status == "SUCCESS":
+                stats["repaired"] += 1
 
     print(f"STATUS: Done. Repaired {stats['repaired']} / {stats['checked']} files.")
     return stats
