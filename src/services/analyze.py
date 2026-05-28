@@ -4,6 +4,7 @@ import acoustid
 import librosa
 import numpy as np
 from pathlib import Path
+import concurrent.futures
 from typing import Dict, Any, Tuple, Optional
 
 from src.core.schema import COLL_RELEASE, COLL_FILE, Release, MusicFile
@@ -176,15 +177,15 @@ def reanalyze_quality() -> Dict[str, Any]:
     total = len(all_files)
     print(f"STATUS: Re-scoring quality for {total} files.")
 
-    for i, record in enumerate(all_files):
+    def _worker(idx_record: Tuple[int, Any]) -> Any:
+        i, record = idx_record
         file_path_str = getattr(record, MusicFile.FILE_PATH, None)
         if not file_path_str:
-            continue
+            return "SKIP"
 
         file_path = Path(file_path_str)
         if not file_path.exists():
-            stats["errors"].append(f"File not found: {file_path_str}")
-            continue
+            return {"error": f"File not found: {file_path_str}"}
 
         print(f"STATUS: [{i+1}/{total}] {file_path.name}")
         try:
@@ -197,6 +198,7 @@ def reanalyze_quality() -> Dict[str, Any]:
             ceiling = get_spectral_ceiling(file_path)
             score, verdict = calculate_quality_score(codec, bitrate, bit_depth, ceiling)
 
+            # Parallelize individual update() calls using thread safety, significantly reducing N+1 HTTP wait times by processing concurrent requests
             pb.collection(COLL_FILE).update(record.id, {
                 MusicFile.CODEC: codec or None,
                 MusicFile.BIT_DEPTH: bit_depth,
@@ -204,11 +206,20 @@ def reanalyze_quality() -> Dict[str, Any]:
                 MusicFile.QUALITY_SCORE: score,
                 MusicFile.QUALITY_VERDICT: verdict,
             })
-            stats["processed"] += 1
+            return {"success": True}
         except Exception as e:
             msg = f"Error re-scoring {file_path_str}: {e}"
             logger.error(msg)
-            stats["errors"].append(msg)
+            return {"error": msg}
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        for res in executor.map(_worker, enumerate(all_files)):
+            if res == "SKIP":
+                continue
+            if "error" in res:
+                stats["errors"].append(res["error"])
+            elif "success" in res:
+                stats["processed"] += 1
 
     print(f"STATUS: Done. Re-scored {stats['processed']} / {total} files.")
     return stats
