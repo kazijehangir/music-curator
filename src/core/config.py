@@ -1,6 +1,15 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
 
 class Settings(BaseSettings):
+    cors_allowed_origins: list[str] | str = "http://127.0.0.1:8090,http://localhost:3000"
+
+    @field_validator("cors_allowed_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: str | list[str]) -> list[str]:
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
     project_name: str = "Music Curator API"
     version: str = "3.0.0"
     
