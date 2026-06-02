@@ -1,3 +1,5 @@
+from typing import List, Union
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -18,6 +20,19 @@ class Settings(BaseSettings):
     ingest_base_path: str
     ingest_dirs: str = "yubal,tidal-dl,adhoc" # Keep as comma separated string for env inject
     media_library_path: str
+    cors_allowed_origins: Union[str, List[str]] = "http://127.0.0.1:8090,http://localhost:3000"
+
+    @field_validator("cors_allowed_origins", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
+        if isinstance(v, str):
+            if v.startswith("["):
+                import json
+                return json.loads(v)
+            return [i.strip() for i in v.split(",")]
+        elif isinstance(v, list):
+            return v
+        raise ValueError(v)
     
     model_config = SettingsConfigDict(
         env_file=".env", 
