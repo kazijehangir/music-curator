@@ -5,6 +5,7 @@ import librosa
 import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
+import concurrent.futures
 
 from src.core.schema import COLL_RELEASE, COLL_FILE, Release, MusicFile
 
@@ -247,16 +248,26 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     total_orphans = len(orphan_ids)
     print(f"STATUS: {total_orphans} orphaned releases to delete.")
 
-    for i, release_id in enumerate(orphan_ids):
+    def _delete_release(release_id: str) -> Optional[str]:
         try:
             pb.collection(COLL_RELEASE).delete(release_id)
-            stats["deleted"] += 1
-            if (i + 1) % 50 == 0:
-                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            return None
         except Exception as e:
             msg = f"Failed to delete release {release_id}: {e}"
             logger.error(msg)
-            stats["errors"].append(msg)
+            return msg
+
+    # ⚡ Bolt: Parallelize API calls to PocketBase to avoid blocking N+1 sequential requests.
+    # Expected Impact: Significantly reduces overall execution time for cleanup_orphaned_releases.
+    # Measurement: Run tests/test_services/test_analyze.py and observe faster completion for large datasets.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        for error_msg in executor.map(_delete_release, orphan_ids):
+            if error_msg:
+                stats["errors"].append(error_msg)
+            else:
+                stats["deleted"] += 1
+                if stats["deleted"] % 50 == 0:
+                    print(f"STATUS: Deleted {stats['deleted']}/{total_orphans}...")
 
     print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
     return stats
