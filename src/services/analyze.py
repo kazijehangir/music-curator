@@ -247,16 +247,27 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     total_orphans = len(orphan_ids)
     print(f"STATUS: {total_orphans} orphaned releases to delete.")
 
-    for i, release_id in enumerate(orphan_ids):
+    import concurrent.futures
+    # Optimization: Use ThreadPoolExecutor to parallelize PocketBase deletion calls.
+    # Expected impact: N+1 API calls are performed concurrently, significantly
+    # reducing total execution time for many orphaned releases.
+    def _delete_release(release_id: str):
         try:
             pb.collection(COLL_RELEASE).delete(release_id)
-            stats["deleted"] += 1
-            if (i + 1) % 50 == 0:
-                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            return True, None
         except Exception as e:
             msg = f"Failed to delete release {release_id}: {e}"
             logger.error(msg)
-            stats["errors"].append(msg)
+            return False, msg
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        for i, (success, err_msg) in enumerate(executor.map(_delete_release, orphan_ids)):
+            if success:
+                stats["deleted"] += 1
+            else:
+                stats["errors"].append(err_msg)
+            if (i + 1) % 50 == 0:
+                print(f"STATUS: Processed {i + 1}/{total_orphans}...")
 
     print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
     return stats
