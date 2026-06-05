@@ -247,16 +247,27 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     total_orphans = len(orphan_ids)
     print(f"STATUS: {total_orphans} orphaned releases to delete.")
 
-    for i, release_id in enumerate(orphan_ids):
+    import concurrent.futures
+
+    def _delete_orphan(r_id):
         try:
-            pb.collection(COLL_RELEASE).delete(release_id)
-            stats["deleted"] += 1
-            if (i + 1) % 50 == 0:
-                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            pb.collection(COLL_RELEASE).delete(r_id)
+            return ("SUCCESS", r_id, None)
         except Exception as e:
-            msg = f"Failed to delete release {release_id}: {e}"
-            logger.error(msg)
-            stats["errors"].append(msg)
+            msg = f"Failed to delete release {r_id}: {e}"
+            return ("ERROR", r_id, msg)
+
+    # Parallelize deleting orphans (network I/O bound) to resolve N+1 sequential bottlenecks
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        for i, result in enumerate(executor.map(_delete_orphan, orphan_ids)):
+            status, r_id, error_msg = result
+            if status == "SUCCESS":
+                stats["deleted"] += 1
+                if (i + 1) % 50 == 0:
+                    print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            else:
+                logger.error(error_msg)
+                stats["errors"].append(error_msg)
 
     print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
     return stats
