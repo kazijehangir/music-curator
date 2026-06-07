@@ -247,16 +247,28 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     total_orphans = len(orphan_ids)
     print(f"STATUS: {total_orphans} orphaned releases to delete.")
 
-    for i, release_id in enumerate(orphan_ids):
+    # ⚡ Bolt: Parallelize independent DB deletes to eliminate N+1 network latency
+    # Expected impact: Deletion time drops from O(N) to O(N/Workers)
+    import concurrent.futures
+    from typing import Union
+
+    def _delete_release(release_id: str) -> Union[bool, str]:
         try:
             pb.collection(COLL_RELEASE).delete(release_id)
-            stats["deleted"] += 1
-            if (i + 1) % 50 == 0:
-                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            return True
         except Exception as e:
-            msg = f"Failed to delete release {release_id}: {e}"
-            logger.error(msg)
-            stats["errors"].append(msg)
+            return f"Failed to delete release {release_id}: {e}"
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        # Iterate over executor.map directly to preserve real-time streaming progress logs
+        for i, result in enumerate(executor.map(_delete_release, orphan_ids)):
+            if result is True:
+                stats["deleted"] += 1
+                if (i + 1) % 50 == 0:
+                    print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            else:
+                logger.error(result)
+                stats["errors"].append(result)
 
     print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
     return stats
