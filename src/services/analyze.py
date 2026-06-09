@@ -2,6 +2,7 @@ import hashlib
 import logging
 import acoustid
 import librosa
+import concurrent.futures
 import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
@@ -247,16 +248,27 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     total_orphans = len(orphan_ids)
     print(f"STATUS: {total_orphans} orphaned releases to delete.")
 
-    for i, release_id in enumerate(orphan_ids):
+    def _delete_orphan(release_id: str) -> Tuple[bool, Optional[str]]:
         try:
             pb.collection(COLL_RELEASE).delete(release_id)
-            stats["deleted"] += 1
-            if (i + 1) % 50 == 0:
-                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            return True, None
         except Exception as e:
-            msg = f"Failed to delete release {release_id}: {e}"
-            logger.error(msg)
-            stats["errors"].append(msg)
+            return False, f"Failed to delete release {release_id}: {e}"
+
+    # OPTIMIZATION: Parallelize individual delete calls to avoid N+1 sequential database operations.
+    # Expected Impact: Reduces total deletion time from O(N) to O(N/Workers), significantly speeding up cleanup.
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = {executor.submit(_delete_orphan, rid): rid for rid in orphan_ids}
+        for i, future in enumerate(concurrent.futures.as_completed(futures)):
+            success, error_msg = future.result()
+            if success:
+                stats["deleted"] += 1
+                if (i + 1) % 50 == 0:
+                    print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            else:
+                if error_msg:
+                    logger.error(error_msg)
+                    stats["errors"].append(error_msg)
 
     print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
     return stats
