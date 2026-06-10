@@ -508,7 +508,7 @@ def test_cleanup_handles_delete_error(mocker):
 
     assert result["deleted"] == 1
     assert len(result["errors"]) == 1
-    assert "rel1" in result["errors"][0]
+    assert any("rel1" in err for err in result["errors"])
 
 
 # ── reanalyze_quality ──────────────────────────────────────────────────────────
