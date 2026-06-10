@@ -247,16 +247,30 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     total_orphans = len(orphan_ids)
     print(f"STATUS: {total_orphans} orphaned releases to delete.")
 
-    for i, release_id in enumerate(orphan_ids):
+    # Optimization: Parallelize N+1 PocketBase deletes to dramatically speed up cleanup.
+    # The PocketBase Python SDK uses a thread-safe httpx.Client.
+    import concurrent.futures
+
+    def _delete_orphan(rid: str) -> tuple[bool, str]:
         try:
-            pb.collection(COLL_RELEASE).delete(release_id)
-            stats["deleted"] += 1
-            if (i + 1) % 50 == 0:
-                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            pb.collection(COLL_RELEASE).delete(rid)
+            return (True, rid)
         except Exception as e:
-            msg = f"Failed to delete release {release_id}: {e}"
-            logger.error(msg)
-            stats["errors"].append(msg)
+            return (False, f"Failed to delete release {rid}: {e}")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_id = {executor.submit(_delete_orphan, rid): rid for rid in orphan_ids}
+        completed = 0
+        for future in concurrent.futures.as_completed(future_to_id):
+            success, result_val = future.result()
+            completed += 1
+            if success:
+                stats["deleted"] += 1
+                if completed % 50 == 0:
+                    print(f"STATUS: Deleted {completed}/{total_orphans}...")
+            else:
+                logger.error(result_val)
+                stats["errors"].append(result_val)
 
     print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
     return stats
