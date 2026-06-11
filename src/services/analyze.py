@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
 
 from src.core.schema import COLL_RELEASE, COLL_FILE, Release, MusicFile
+import concurrent.futures
 
 logger = logging.getLogger(__name__)
 
@@ -247,16 +248,26 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     total_orphans = len(orphan_ids)
     print(f"STATUS: {total_orphans} orphaned releases to delete.")
 
-    for i, release_id in enumerate(orphan_ids):
+    # ⚡ Bolt Optimization: PocketBase SDK (httpx.Client) is thread-safe.
+    # Parallelizing N+1 deletion loops reduces blocking I/O time significantly.
+    # Expected impact: Deletes complete in ~10% of the original sequential time.
+    def _delete_release(rid: str) -> Optional[str]:
         try:
-            pb.collection(COLL_RELEASE).delete(release_id)
-            stats["deleted"] += 1
+            pb.collection(COLL_RELEASE).delete(rid)
+            return None
+        except Exception as e:
+            msg = f"Failed to delete release {rid}: {e}"
+            logger.error(msg)
+            return msg
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        for i, error_msg in enumerate(executor.map(_delete_release, orphan_ids)):
+            if error_msg is None:
+                stats["deleted"] += 1
+            else:
+                stats["errors"].append(error_msg)
             if (i + 1) % 50 == 0:
                 print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
-        except Exception as e:
-            msg = f"Failed to delete release {release_id}: {e}"
-            logger.error(msg)
-            stats["errors"].append(msg)
 
     print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
     return stats
