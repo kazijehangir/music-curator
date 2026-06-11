@@ -1,9 +1,28 @@
+import json
+from typing import List, Union
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     project_name: str = "Music Curator API"
     version: str = "3.0.0"
     
+    # Security
+    cors_allowed_origins: Union[str, List[str]] = ["http://127.0.0.1:8090", "http://localhost:3000"]
+
+    @field_validator("cors_allowed_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            if v.startswith("["):
+                try:
+                    return json.loads(v)
+                except json.JSONDecodeError:
+                    return [v]
+            return [x.strip() for x in v.split(",") if x.strip()]
+        return v
+
     # Internal APIs
     pocketbase_url: str = "http://127.0.0.1:8090" # Used as default if internal env not supplied
     pocketbase_admin_email: str
