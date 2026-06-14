@@ -5,12 +5,10 @@ access are required. Real filesystem calls (mkdir, symlink_to, unlink)
 use pytest's tmp_path fixture — pyfakefs is intentionally avoided because
 symlinks need real kernel support.
 """
-import pytest
-from pathlib import Path
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 from src.services.symlink import _sanitize, _target_path, run_symlink
-from src.core.schema import COLL_RELEASE, COLL_FILE, MusicFile
+from src.core.schema import MusicFile
 
 
 # ── _sanitize ─────────────────────────────────────────────────────────────────
@@ -221,7 +219,7 @@ def test_run_symlink_updates_moved_path(mocker, tmp_path):
         str(audio), 'rel001', codec='flac', symlink_path=str(old_link)
     )
 
-    mock_pb = _make_pb_mock(mocker, [release], [file_rec], [], str(library))
+    _make_pb_mock(mocker, [release], [file_rec], [], str(library))
 
     result = run_symlink()
 
