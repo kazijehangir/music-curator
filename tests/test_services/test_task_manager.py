@@ -1,8 +1,7 @@
 import pytest
 import asyncio
-import os
 import signal
-from unittest.mock import MagicMock, patch, AsyncMock, ANY
+from unittest.mock import patch, AsyncMock
 from src.services.task_manager import TaskManager
 
 @pytest.mark.asyncio
@@ -34,7 +33,7 @@ async def test_task_manager_run_task_success():
             lines.append(line)
             
     # Verify n8n output only has filtered lines
-    assert any("Task started" in l for l in lines)
+    assert any("Task started" in line for line in lines)
     assert "STATUS: Analyzing 1/2\n" in lines
     assert "RESULT: Success\n" in lines
     assert "raw debug log 1\n" not in lines # Should be filtered out
@@ -111,6 +110,6 @@ async def test_task_manager_readline_error_handling():
             results.append(line)
 
         # Results should contain start msg and then the error
-        assert any("Task started" in l for l in results)
-        assert any("ERROR: Internal Error in TaskManager for /api/test-readline: Readline Error" in l for l in results)
+        assert any("Task started" in line for line in results)
+        assert any("ERROR: Internal Error in TaskManager for /api/test-readline: Readline Error" in line for line in results)
         mock_task_logger.error.assert_called_once_with("Internal Error in TaskManager for /api/test-readline: Readline Error")
