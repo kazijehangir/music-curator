@@ -1,9 +1,7 @@
-import pytest
 import concurrent.futures
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 from src.services.discover import run_discovery, extract_metadata, repair_file_metadata
-from src.core.schema import COLL_FILE, MusicFile
+from src.core.schema import MusicFile
 
 from src.core.config import settings
 

@@ -1,7 +1,6 @@
 import sys
 import argparse
 import logging
-from pathlib import Path
 
 # Configure basic logging to stdout for the CLI
 logging.basicConfig(
