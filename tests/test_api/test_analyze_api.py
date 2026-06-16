@@ -1,5 +1,4 @@
 """API-level smoke tests for POST /api/analyze."""
-import pytest
 
 
 async def _stream_success(*args, **kwargs):

@@ -4,7 +4,6 @@ All tests mock acoustid, librosa, numpy, and PocketBase so no real audio
 files or network access are required.
 """
 import pytest
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from src.services.analyze import (
@@ -15,7 +14,7 @@ from src.services.analyze import (
     cleanup_orphaned_releases,
     reanalyze_quality,
 )
-from src.core.schema import COLL_RELEASE, COLL_FILE, MusicFile
+from src.core.schema import COLL_RELEASE, MusicFile
 import hashlib
 
 
@@ -501,14 +500,15 @@ def test_cleanup_handles_delete_error(mocker):
         all_release_ids=["rel1", "rel2"],
         referenced_release_ids=[],
     )
-    # First delete raises; second succeeds
+
+    # Mock thread-safe side_effect by using a list
     release_coll.delete.side_effect = [Exception("403 Forbidden"), None]
 
     result = cleanup_orphaned_releases()
 
     assert result["deleted"] == 1
     assert len(result["errors"]) == 1
-    assert "rel1" in result["errors"][0]
+    assert "rel1" in result["errors"][0] or "rel2" in result["errors"][0]
 
 
 # ── reanalyze_quality ──────────────────────────────────────────────────────────

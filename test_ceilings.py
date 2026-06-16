@@ -1,5 +1,4 @@
 import sys
-import logging
 from pathlib import Path
 sys.path.append('.')
 from src.services.analyze import get_spectral_ceiling
