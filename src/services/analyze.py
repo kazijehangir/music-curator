@@ -3,6 +3,7 @@ import logging
 import acoustid
 import librosa
 import numpy as np
+import concurrent.futures
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
 
@@ -247,16 +248,29 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     total_orphans = len(orphan_ids)
     print(f"STATUS: {total_orphans} orphaned releases to delete.")
 
-    for i, release_id in enumerate(orphan_ids):
+    def _delete_release(release_id: str):
         try:
             pb.collection(COLL_RELEASE).delete(release_id)
-            stats["deleted"] += 1
-            if (i + 1) % 50 == 0:
-                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            return True, release_id
         except Exception as e:
             msg = f"Failed to delete release {release_id}: {e}"
             logger.error(msg)
-            stats["errors"].append(msg)
+            return False, msg
+
+    # OPTIMIZATION: Parallelize network requests to PocketBase to avoid N+1 sequential latency.
+    # Expected impact: Deleting 1,000 orphans sequentially at ~30ms/req takes ~30s.
+    # Concurrent execution with 10 workers drops this to ~3s (a ~10x speedup).
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(_delete_release, rid) for rid in orphan_ids]
+        for i, future in enumerate(concurrent.futures.as_completed(futures)):
+            success, result = future.result()
+            if success:
+                stats["deleted"] += 1
+            else:
+                stats["errors"].append(result)
+
+            if (i + 1) % 50 == 0:
+                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
 
     print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
     return stats
