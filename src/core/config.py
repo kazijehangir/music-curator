@@ -1,3 +1,6 @@
+import json
+from typing import Union, List
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -13,6 +16,17 @@ class Settings(BaseSettings):
     lm_studio_url: str = "http://localhost:1234/v1" # Overridden by LM_STUDIO_URL env var
     llm_model_name: str = "openai/gpt-oss-20b"
     
+    # CORS
+    cors_allowed_origins: Union[str, List[str]] = ["http://127.0.0.1:8090", "http://localhost:3000"]
+
+    @field_validator("cors_allowed_origins", mode="before")
+    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[str, List[str]]:
+        if isinstance(v, str) and not v.startswith("["):
+            return [i.strip() for i in v.split(",")]
+        elif isinstance(v, str) and v.startswith("["):
+            return json.loads(v)
+        return v
+
     # Internal Paths
     nas_mount_path: str
     ingest_base_path: str
