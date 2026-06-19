@@ -11,6 +11,7 @@ from src.core.schema import COLL_RELEASE, COLL_FILE, Release, MusicFile
 logger = logging.getLogger(__name__)
 
 import mutagen
+import concurrent.futures
 
 def generate_acoustid(file_path: Path) -> Optional[str]:
     """
@@ -247,16 +248,25 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     total_orphans = len(orphan_ids)
     print(f"STATUS: {total_orphans} orphaned releases to delete.")
 
-    for i, release_id in enumerate(orphan_ids):
+    def _delete_release(release_id):
         try:
             pb.collection(COLL_RELEASE).delete(release_id)
-            stats["deleted"] += 1
-            if (i + 1) % 50 == 0:
-                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            return True, None
         except Exception as e:
             msg = f"Failed to delete release {release_id}: {e}"
             logger.error(msg)
-            stats["errors"].append(msg)
+            return False, msg
+
+    # Concurrently delete orphaned releases to improve performance (N+1 database API calls).
+    # ThreadPoolExecutor is safe for I/O bound PocketBase operations.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        for i, (success, error_msg) in enumerate(executor.map(_delete_release, orphan_ids)):
+            if success:
+                stats["deleted"] += 1
+                if (i + 1) % 50 == 0:
+                    print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            else:
+                stats["errors"].append(error_msg)
 
     print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
     return stats
