@@ -11,6 +11,7 @@ from src.core.schema import COLL_RELEASE, COLL_FILE, Release, MusicFile
 logger = logging.getLogger(__name__)
 
 import mutagen
+import concurrent.futures
 
 def generate_acoustid(file_path: Path) -> Optional[str]:
     """
@@ -247,16 +248,28 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     total_orphans = len(orphan_ids)
     print(f"STATUS: {total_orphans} orphaned releases to delete.")
 
-    for i, release_id in enumerate(orphan_ids):
+    def _delete_release(rid: str) -> tuple[bool, str, str]:
         try:
-            pb.collection(COLL_RELEASE).delete(release_id)
-            stats["deleted"] += 1
-            if (i + 1) % 50 == 0:
-                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            pb.collection(COLL_RELEASE).delete(rid)
+            return True, rid, ""
         except Exception as e:
-            msg = f"Failed to delete release {release_id}: {e}"
-            logger.error(msg)
-            stats["errors"].append(msg)
+            return False, rid, str(e)
+
+    # Bolt ⚡: Process deletions in parallel.
+    # Instead of waiting for N sequential network requests,
+    # run up to 10 concurrently to heavily cut down overall cleanup time.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_id = {executor.submit(_delete_release, rid): rid for rid in orphan_ids}
+        for i, future in enumerate(concurrent.futures.as_completed(future_to_id)):
+            success, rid, err_str = future.result()
+            if success:
+                stats["deleted"] += 1
+                if stats["deleted"] % 50 == 0:
+                    print(f"STATUS: Deleted {stats['deleted']}/{total_orphans}...")
+            else:
+                msg = f"Failed to delete release {rid}: {err_str}"
+                logger.error(msg)
+                stats["errors"].append(msg)
 
     print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
     return stats
