@@ -5,12 +5,14 @@ import librosa
 import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
+import concurrent.futures
 
 from src.core.schema import COLL_RELEASE, COLL_FILE, Release, MusicFile
 
+import mutagen
+
 logger = logging.getLogger(__name__)
 
-import mutagen
 
 def generate_acoustid(file_path: Path) -> Optional[str]:
     """
@@ -247,16 +249,24 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     total_orphans = len(orphan_ids)
     print(f"STATUS: {total_orphans} orphaned releases to delete.")
 
-    for i, release_id in enumerate(orphan_ids):
+    # ⚡ Bolt Optimization: Parallelize orphan deletion API calls to reduce total execution time
+    # Impact: Significantly faster cleanup when dealing with large numbers of orphaned releases
+    def _delete_release(release_id: str) -> Tuple[bool, Optional[str]]:
         try:
             pb.collection(COLL_RELEASE).delete(release_id)
-            stats["deleted"] += 1
-            if (i + 1) % 50 == 0:
-                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            return True, None
         except Exception as e:
-            msg = f"Failed to delete release {release_id}: {e}"
-            logger.error(msg)
-            stats["errors"].append(msg)
+            return False, f"Failed to delete release {release_id}: {e}"
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        for i, (success, error_msg) in enumerate(executor.map(_delete_release, orphan_ids)):
+            if success:
+                stats["deleted"] += 1
+                if (i + 1) % 50 == 0:
+                    print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            else:
+                logger.error(error_msg)
+                stats["errors"].append(error_msg)
 
     print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
     return stats
