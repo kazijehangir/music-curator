@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import patch
 
 def test_api_tag_endpoint(client, mock_pocketbase):

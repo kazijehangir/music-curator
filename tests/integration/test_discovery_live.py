@@ -1,4 +1,3 @@
-import asyncio
 from src.services.discover import run_discovery
 
 def run():

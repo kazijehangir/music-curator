@@ -1,8 +1,7 @@
 import pytest
 import asyncio
-import os
 import signal
-from unittest.mock import MagicMock, patch, AsyncMock, ANY
+from unittest.mock import patch, AsyncMock
 from src.services.task_manager import TaskManager
 
 @pytest.mark.asyncio
