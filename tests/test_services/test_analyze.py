@@ -501,6 +501,7 @@ def test_cleanup_handles_delete_error(mocker):
         all_release_ids=["rel1", "rel2"],
         referenced_release_ids=[],
     )
+    # Mocking side_effect with a list is thread-safe in python 3.12, allowing us to test concurrency
     # First delete raises; second succeeds
     release_coll.delete.side_effect = [Exception("403 Forbidden"), None]
 
@@ -508,7 +509,8 @@ def test_cleanup_handles_delete_error(mocker):
 
     assert result["deleted"] == 1
     assert len(result["errors"]) == 1
-    assert "rel1" in result["errors"][0]
+    # Check that either rel1 or rel2 failed since execution order is non-deterministic
+    assert "rel1" in result["errors"][0] or "rel2" in result["errors"][0]
 
 
 # ── reanalyze_quality ──────────────────────────────────────────────────────────
