@@ -5,6 +5,7 @@ import librosa
 import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
+import concurrent.futures
 
 from src.core.schema import COLL_RELEASE, COLL_FILE, Release, MusicFile
 
@@ -247,16 +248,27 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     total_orphans = len(orphan_ids)
     print(f"STATUS: {total_orphans} orphaned releases to delete.")
 
-    for i, release_id in enumerate(orphan_ids):
+    # ⚡ Bolt: Parallelize DB deletions to avoid N+1 sequential latency.
+    # Impact: Significantly reduces overall deletion time by running network calls concurrently.
+    # Measurement: Network round-trips for deletions are no longer sequential, cutting time by up to ~5x depending on latency.
+    def delete_worker(rel_id: str):
         try:
-            pb.collection(COLL_RELEASE).delete(release_id)
-            stats["deleted"] += 1
-            if (i + 1) % 50 == 0:
-                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            pb.collection(COLL_RELEASE).delete(rel_id)
+            return True, None
         except Exception as e:
-            msg = f"Failed to delete release {release_id}: {e}"
-            logger.error(msg)
-            stats["errors"].append(msg)
+            return False, f"Failed to delete release {rel_id}: {e}"
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(delete_worker, r_id) for r_id in orphan_ids]
+        for idx, future in enumerate(concurrent.futures.as_completed(futures)):
+            success, err_msg = future.result()
+            if success:
+                stats["deleted"] += 1
+                if (idx + 1) % 50 == 0:
+                    print(f"STATUS: Deleted {idx + 1}/{total_orphans}...")
+            else:
+                logger.error(err_msg)
+                stats["errors"].append(err_msg)
 
     print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
     return stats
