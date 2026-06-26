@@ -4,6 +4,7 @@ import acoustid
 import librosa
 import numpy as np
 from pathlib import Path
+import concurrent.futures
 from typing import Dict, Any, Tuple, Optional
 
 from src.core.schema import COLL_RELEASE, COLL_FILE, Release, MusicFile
@@ -247,16 +248,25 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     total_orphans = len(orphan_ids)
     print(f"STATUS: {total_orphans} orphaned releases to delete.")
 
-    for i, release_id in enumerate(orphan_ids):
+    # ⚡ Bolt Optimization: Parallelize N+1 PocketBase deletes using ThreadPoolExecutor.
+    # This significantly reduces network latency when cleaning up many orphans.
+    def _delete_orphan(release_id: str) -> Optional[str]:
         try:
             pb.collection(COLL_RELEASE).delete(release_id)
-            stats["deleted"] += 1
-            if (i + 1) % 50 == 0:
-                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            return None
         except Exception as e:
             msg = f"Failed to delete release {release_id}: {e}"
             logger.error(msg)
-            stats["errors"].append(msg)
+            return msg
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        for i, error_msg in enumerate(executor.map(_delete_orphan, orphan_ids)):
+            if error_msg:
+                stats["errors"].append(error_msg)
+            else:
+                stats["deleted"] += 1
+            if (i + 1) % 50 == 0:
+                print(f"STATUS: Processed {i + 1}/{total_orphans} orphans...")
 
     print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
     return stats
