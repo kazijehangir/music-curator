@@ -5,12 +5,11 @@ import librosa
 import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
+import mutagen
 
 from src.core.schema import COLL_RELEASE, COLL_FILE, Release, MusicFile
 
 logger = logging.getLogger(__name__)
-
-import mutagen
 
 def generate_acoustid(file_path: Path) -> Optional[str]:
     """
@@ -242,21 +241,36 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     referenced_ids = {getattr(f, MusicFile.RELEASE, None) for f in all_files} - {None, ""}
     print(f"STATUS: {len(referenced_ids)} releases are referenced by at least one file.")
 
+    import concurrent.futures
+
     # 3. Delete orphans
     orphan_ids = [r.id for r in all_releases if r.id not in referenced_ids]
     total_orphans = len(orphan_ids)
     print(f"STATUS: {total_orphans} orphaned releases to delete.")
 
-    for i, release_id in enumerate(orphan_ids):
+    def delete_orphan(release_id: str) -> tuple[bool, str]:
         try:
             pb.collection(COLL_RELEASE).delete(release_id)
-            stats["deleted"] += 1
-            if (i + 1) % 50 == 0:
-                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            return True, release_id
         except Exception as e:
-            msg = f"Failed to delete release {release_id}: {e}"
-            logger.error(msg)
-            stats["errors"].append(msg)
+            return False, f"Failed to delete release {release_id}: {e}"
+
+    # Bolt Optimization: Parallelize N+1 database calls
+    # Impact: Reduces cleanup time from O(N) network round trips to O(N/Workers)
+    # Note: PocketBase SDK is thread-safe and can handle concurrent database calls over ThreadPoolExecutor to accelerate queries.
+    processed = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(delete_orphan, rid): rid for rid in orphan_ids}
+        for future in concurrent.futures.as_completed(futures):
+            success, result = future.result()
+            processed += 1
+            if success:
+                stats["deleted"] += 1
+                if processed % 50 == 0:
+                    print(f"STATUS: Deleted {processed}/{total_orphans}...")
+            else:
+                logger.error(result)
+                stats["errors"].append(result)
 
     print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
     return stats
