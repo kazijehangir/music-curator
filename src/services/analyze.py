@@ -5,6 +5,7 @@ import librosa
 import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
+import concurrent.futures
 
 from src.core.schema import COLL_RELEASE, COLL_FILE, Release, MusicFile
 
@@ -247,16 +248,33 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     total_orphans = len(orphan_ids)
     print(f"STATUS: {total_orphans} orphaned releases to delete.")
 
-    for i, release_id in enumerate(orphan_ids):
+    def _delete_orphan(release_id: str) -> tuple[bool, str, str]:
         try:
             pb.collection(COLL_RELEASE).delete(release_id)
-            stats["deleted"] += 1
-            if (i + 1) % 50 == 0:
-                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            return True, release_id, ""
         except Exception as e:
             msg = f"Failed to delete release {release_id}: {e}"
             logger.error(msg)
-            stats["errors"].append(msg)
+            return False, release_id, msg
+
+    # ⚡ Bolt Optimization: Parallelize sequential N+1 PocketBase deletes
+    # Replaces a slow sequential for-loop with ThreadPoolExecutor to perform
+    # database deletes concurrently. Since PocketBase SDK is thread-safe and
+    # deletions are independent, this prevents network latency per API request
+    # from compounding.
+    # Expected Impact: Drastically speeds up cleanup by allowing up to 10
+    # simultaneous requests, reducing total latency linearly by the number of workers.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(_delete_orphan, rid) for rid in orphan_ids]
+        for i, future in enumerate(concurrent.futures.as_completed(futures)):
+            success, release_id, err_msg = future.result()
+            if success:
+                stats["deleted"] += 1
+            else:
+                stats["errors"].append(err_msg)
+
+            if (i + 1) % 50 == 0:
+                print(f"STATUS: Processed {i + 1}/{total_orphans}...")
 
     print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
     return stats
