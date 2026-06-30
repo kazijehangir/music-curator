@@ -502,7 +502,7 @@ def test_cleanup_handles_delete_error(mocker):
         referenced_release_ids=[],
     )
     # First delete raises; second succeeds
-    release_coll.delete.side_effect = [Exception("403 Forbidden"), None]
+    release_coll.delete.side_effect = lambda x: (_ for _ in ()).throw(Exception("403 Forbidden")) if x == "rel1" else None
 
     result = cleanup_orphaned_releases()
 
