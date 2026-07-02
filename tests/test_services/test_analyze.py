@@ -501,8 +501,13 @@ def test_cleanup_handles_delete_error(mocker):
         all_release_ids=["rel1", "rel2"],
         referenced_release_ids=[],
     )
-    # First delete raises; second succeeds
-    release_coll.delete.side_effect = [Exception("403 Forbidden"), None]
+    # Mock one to fail, one to succeed regardless of concurrent execution order
+    def mock_delete(r_id):
+        if r_id == "rel1":
+            raise Exception("403 Forbidden")
+        return None
+
+    release_coll.delete.side_effect = mock_delete
 
     result = cleanup_orphaned_releases()
 
