@@ -247,16 +247,29 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     total_orphans = len(orphan_ids)
     print(f"STATUS: {total_orphans} orphaned releases to delete.")
 
-    for i, release_id in enumerate(orphan_ids):
+    # ⚡ Bolt: Parallelize independent database deletions to eliminate N+1 network roundtrips.
+    # Impact: Reduces deletion time from O(N) sequential HTTP calls to O(N/Workers), significantly speeding up large cleanup operations.
+    import concurrent.futures
+
+    def _delete_release(rid: str) -> tuple[bool, str]:
         try:
-            pb.collection(COLL_RELEASE).delete(release_id)
-            stats["deleted"] += 1
-            if (i + 1) % 50 == 0:
-                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            pb.collection(COLL_RELEASE).delete(rid)
+            return True, ""
         except Exception as e:
-            msg = f"Failed to delete release {release_id}: {e}"
-            logger.error(msg)
-            stats["errors"].append(msg)
+            return False, f"Failed to delete release {rid}: {e}"
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(_delete_release, rid): rid for rid in orphan_ids}
+
+        for future in concurrent.futures.as_completed(futures):
+            success, msg = future.result()
+            if success:
+                stats["deleted"] += 1
+                if (stats["deleted"]) % 50 == 0:
+                    print(f"STATUS: Deleted {stats['deleted']}/{total_orphans}...")
+            else:
+                logger.error(msg)
+                stats["errors"].append(msg)
 
     print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
     return stats
