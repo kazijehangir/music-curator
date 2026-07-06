@@ -1,3 +1,4 @@
+import concurrent.futures
 import hashlib
 import logging
 import acoustid
@@ -5,12 +6,12 @@ import librosa
 import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
+import mutagen
 
 from src.core.schema import COLL_RELEASE, COLL_FILE, Release, MusicFile
 
 logger = logging.getLogger(__name__)
 
-import mutagen
 
 def generate_acoustid(file_path: Path) -> Optional[str]:
     """
@@ -247,16 +248,29 @@ def cleanup_orphaned_releases() -> Dict[str, Any]:
     total_orphans = len(orphan_ids)
     print(f"STATUS: {total_orphans} orphaned releases to delete.")
 
-    for i, release_id in enumerate(orphan_ids):
+    def _delete_orphan(rid):
         try:
-            pb.collection(COLL_RELEASE).delete(release_id)
-            stats["deleted"] += 1
-            if (i + 1) % 50 == 0:
-                print(f"STATUS: Deleted {i + 1}/{total_orphans}...")
+            pb.collection(COLL_RELEASE).delete(rid)
+            return True, None
         except Exception as e:
-            msg = f"Failed to delete release {release_id}: {e}"
-            logger.error(msg)
-            stats["errors"].append(msg)
+            return False, f"Failed to delete release {rid}: {e}"
+
+    # ⚡ Bolt Optimization: Parallelize N+1 database deletes
+    # Reduces blocking IO wait time when cleaning up large numbers of orphans.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_id = {executor.submit(_delete_orphan, rid): rid for rid in orphan_ids}
+        completed = 0
+        for future in concurrent.futures.as_completed(future_to_id):
+            success, err = future.result()
+            if success:
+                stats["deleted"] += 1
+            else:
+                logger.error(err)
+                stats["errors"].append(err)
+
+            completed += 1
+            if completed % 50 == 0:
+                print(f"STATUS: Deleted {completed}/{total_orphans}...")
 
     print(f"STATUS: Done. Deleted {stats['deleted']} orphaned releases.")
     return stats
